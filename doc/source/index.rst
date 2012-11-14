@@ -146,6 +146,23 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
+API
+===
+
+Client
+------
+
+.. automodule:: trollcast.client
+   :members:
+   :undoc-members:
+
+Server
+------
+
+.. automodule:: trollcast.server
+   :members:
+   :undoc-members:
+
 Indices and tables
 ==================
 
