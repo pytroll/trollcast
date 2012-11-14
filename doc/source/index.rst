@@ -122,11 +122,11 @@ There are two ways of running the client:
    retrieve data from NOAA 18 for the 14th of November 2012, between 14:02:23
    and 14:15:00, the client has to be called with::
 
-     client.py -t 20121114140223 20121114141500 -o noaa18_20121114140223.hmf -f config_file.cfg NOAA18
+     client.py -t 20121114140223 20121114141500 -o noaa18_20121114140223.hmf -f config_file.cfg noaa_18
  - The second way is to retrieve all the data possible data and dump it to
    files::
 
-     client.py -f config_file.cfg NOAA15 NOAA16 NOAA18 NOAA19
+     client.py -f config_file.cfg noaa_15 noaa_16 noaa_18 noaa_19
 
    In this case, only new data will be retrieved though, contrarily to the time
    interval retrieval where old data will be retrieved too if necessary.
