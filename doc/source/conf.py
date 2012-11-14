@@ -40,7 +40,8 @@ class Mock(object):
         else:
             return Mock()
 
-MOCK_MODULES = ['zmq', 'numpy', 'posttroll', 'posttroll.message']
+MOCK_MODULES = ['zmq', 'numpy', 'posttroll', 'posttroll.message', 'posttroll.subscriber',
+                'pyorbital.orbital', 'watchdog.events', 'watchdog.observers']
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = Mock()
     
