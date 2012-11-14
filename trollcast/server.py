@@ -464,7 +464,7 @@ class Responder(SocketLooperThread):
         self._loop = False
 
 
-def main(configfile):
+def serve(configfile):
     """Serve forever.
     """
 
@@ -503,9 +503,9 @@ def main(configfile):
     if mirror is not None:
         mirror.stop()
         
-    print "Thanks for using pytroll/trollcast. See you soon on www.pytroll.org!"
+#     print "Thanks for using pytroll/trollcast. See you soon on www.pytroll.org!"
 
-if __name__ == '__main__':
-    import sys
+# if __name__ == '__main__':
+#     import sys
 
-    main(sys.argv[1])
+#     main(sys.argv[1])

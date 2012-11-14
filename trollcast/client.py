@@ -36,7 +36,7 @@ from posttroll.subscriber import Subscriber
 from zmq import Context, REQ, LINGER, Poller, POLLIN
 
 
-logger = logging.getLogger("client")
+logger = logging.getLogger(__name__)
 
 # TODO: what if a scanline never arrives ? do we wait for it forever ?
 
@@ -477,72 +477,72 @@ class Client(HaveBuffer):
         for req in self._requesters.values():
             req.stop()
 
-def main():
-    """Run the client.
-    """
-    import argparse
-    global LOG
-    LOG = logging.getLogger("")
-    LOG.setLevel(logging.DEBUG)
-    ch1 = logging.StreamHandler()
-    ch1.setLevel(logging.DEBUG)
+# def main():
+#     """Run the client.
+#     """
+#     import argparse
+#     global LOG
+#     LOG = logging.getLogger("")
+#     LOG.setLevel(logging.DEBUG)
+#     ch1 = logging.StreamHandler()
+#     ch1.setLevel(logging.DEBUG)
 
-    class MyFormatter(logging.Formatter):
-        """New formatter with milliseconds
-        """
-        converter = datetime.fromtimestamp
+#     class MyFormatter(logging.Formatter):
+#         """New formatter with milliseconds
+#         """
+#         converter = datetime.fromtimestamp
         
-        def formatTime(self, record, datefmt=None):
-            """Format with milliseconds if no date format is given.
-            """
-            ct_ = self.converter(record.created)
-            if datefmt:
-                s__ = ct_.strftime(datefmt)
-            else:
-                t__ = ct_.strftime("%Y-%m-%d %H:%M:%S")
-                s__ = "%s.%03d" % (t__, record.msecs)
-            return s__
+#         def formatTime(self, record, datefmt=None):
+#             """Format with milliseconds if no date format is given.
+#             """
+#             ct_ = self.converter(record.created)
+#             if datefmt:
+#                 s__ = ct_.strftime(datefmt)
+#             else:
+#                 t__ = ct_.strftime("%Y-%m-%d %H:%M:%S")
+#                 s__ = "%s.%03d" % (t__, record.msecs)
+#             return s__
 
 
-    formatter = MyFormatter('[ %(levelname)s %(name)s %(asctime)s] %(message)s')
-    ch1.setFormatter(formatter)
-    LOG.addHandler(ch1)
+#     formatter = MyFormatter('[ %(levelname)s %(name)s %(asctime)s] %(message)s')
+#     ch1.setFormatter(formatter)
+#     LOG.addHandler(ch1)
     
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-t", "--times", nargs=2,
-                        help="Start and end times, <YYYYMMDDHHMMSS>")
-    parser.add_argument("-o", "--output",
-                        help="Output file (used only in conjuction with -t)")
-    parser.add_argument("-f", "--config_file", required=True,
-                        help="eg. sattorrent_local.cfg")
-    parser.add_argument("satellite", nargs="+", help="eg. noaa_18")
-    args = parser.parse_args()
-    times = args.times
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("-t", "--times", nargs=2,
+#                         help="Start and end times, <YYYYMMDDHHMMSS>")
+#     parser.add_argument("-o", "--output",
+#                         help="Output file (used only in conjuction with -t)")
+#     parser.add_argument("-f", "--config_file", required=True,
+#                         help="eg. sattorrent_local.cfg")
+#     parser.add_argument("satellite", nargs="+", help="eg. noaa_18")
+#     args = parser.parse_args()
+#     times = args.times
 
-    client = Client(args.config_file)
-    client.start()
+#     client = Client(args.config_file)
+#     client.start()
 
-    try:
-        if times:
-            start_time = datetime.strptime(times[0], "%Y%m%d%H%M%S")
-            end_time = datetime.strptime(times[1], "%Y%m%d%H%M%S")
+#     try:
+#         if times:
+#             start_time = datetime.strptime(times[0], "%Y%m%d%H%M%S")
+#             end_time = datetime.strptime(times[1], "%Y%m%d%H%M%S")
             
-            time_slice = slice(start_time, end_time)
-            platform = " ".join(args.satellite[0].split("_")).upper()
-            client.order(time_slice, platform, args.output)
-        else:
-            platforms = [" ".join(plat.split("_")).upper()
-                         for plat in args.satellite]
+#             time_slice = slice(start_time, end_time)
+#             platform = " ".join(args.satellite[0].split("_")).upper()
+#             client.order(time_slice, platform, args.output)
+#         else:
+#             platforms = [" ".join(plat.split("_")).upper()
+#                          for plat in args.satellite]
             
-            client.get_all(platforms)
-    except KeyboardInterrupt:
-        pass
+#             client.get_all(platforms)
+#     except KeyboardInterrupt:
+#         pass
     
-    finally:
-        client.stop()
-        print ("Thanks for using pytroll/trollcast. "
-               "See you soon on www.pytroll.org!")
+#     finally:
+#         client.stop()
+#         print ("Thanks for using pytroll/trollcast. "
+#                "See you soon on www.pytroll.org!")
 
     
-if __name__ == '__main__':
-    main()
+# if __name__ == '__main__':
+#     main()
