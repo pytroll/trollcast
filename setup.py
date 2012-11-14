@@ -30,7 +30,7 @@ import imp
 version = imp.load_source('trollcast.version', 'trollcast/version.py')
 
 
-requirements = ['pyzmq']
+requirements = ['pyzmq', 'pyorbital', 'posttroll', 'numpy']
 if sys.version_info < (2, 7):
     requirements.append('argparse')
 
