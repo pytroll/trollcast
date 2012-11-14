@@ -10,7 +10,7 @@ dist
 build
 eggs
 parts
-bin
+bin/*.py*
 var
 sdist
 develop-eggs
