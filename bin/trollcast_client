@@ -28,33 +28,10 @@ from datetime import datetime
 from trollcast.client import Client
 import argparse
 
+logger = logging.getLogger(__name__)
+
 if __name__ == '__main__':
-    logging.getLogger("").setLevel(logging.DEBUG)
-    ch1 = logging.StreamHandler()
-    ch1.setLevel(logging.DEBUG)
-    LOG = logging.getLogger("trollcast_client")
 
-    class MyFormatter(logging.Formatter):
-        """New formatter with milliseconds
-        """
-        converter = datetime.fromtimestamp
-        
-        def formatTime(self, record, datefmt=None):
-            """Format with milliseconds if no date format is given.
-            """
-            ct_ = self.converter(record.created)
-            if datefmt:
-                s__ = ct_.strftime(datefmt)
-            else:
-                t__ = ct_.strftime("%Y-%m-%d %H:%M:%S")
-                s__ = "%s.%03d" % (t__, record.msecs)
-            return s__
-
-
-    formatter = MyFormatter('[ %(levelname)s %(name)s %(asctime)s] %(message)s')
-    ch1.setFormatter(formatter)
-    LOG.addHandler(ch1)
-    
     parser = argparse.ArgumentParser()
     parser.add_argument("-t", "--times", nargs=2,
                         help="Start and end times, <YYYYMMDDHHMMSS>")
@@ -63,7 +40,23 @@ if __name__ == '__main__':
     parser.add_argument("-f", "--config_file", required=True,
                         help="eg. sattorrent_local.cfg")
     parser.add_argument("satellite", nargs="+", help="eg. noaa_18")
+    parser.add_argument("-v", "--verbose", action="store_true")    
     args = parser.parse_args()
+
+    ch1 = logging.StreamHandler()
+    ch1.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter('[%(levelname)s %(name)s %(asctime)s] %(message)s')
+    ch1.setFormatter(formatter)
+    logging.getLogger('').addHandler(ch1)
+    if args.verbose:
+        logging.getLogger('').setLevel(logging.DEBUG)
+    else:
+        logging.getLogger('').setLevel(logging.INFO)
+    logger = logging.getLogger("trollcast_client")
+
+
+
     times = args.times
 
     client = Client(args.config_file)

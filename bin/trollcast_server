@@ -23,42 +23,32 @@
 """Trollcast server.
 """
 
-from trollcast.server import serve
 import argparse
 import logging
 from datetime import datetime
+from trollcast.server import serve
+
+logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
 
-    logging.getLogger("").setLevel(logging.DEBUG)
     ch1 = logging.StreamHandler()
     ch1.setLevel(logging.DEBUG)
-    LOG = logging.getLogger("trollcast_client")
 
-    class MyFormatter(logging.Formatter):
-        """New formatter with milliseconds
-        """
-        converter = datetime.fromtimestamp
-        
-        def formatTime(self, record, datefmt=None):
-            """Format with milliseconds if no date format is given.
-            """
-            ct_ = self.converter(record.created)
-            if datefmt:
-                s__ = ct_.strftime(datefmt)
-            else:
-                t__ = ct_.strftime("%Y-%m-%d %H:%M:%S")
-                s__ = "%s.%03d" % (t__, record.msecs)
-            return s__
-
-
-    formatter = MyFormatter('[ %(levelname)s %(name)s %(asctime)s] %(message)s')
+    formatter = logging.Formatter('[%(levelname)s %(name)s %(asctime)s] %(message)s')
     ch1.setFormatter(formatter)
-    LOG.addHandler(ch1)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("config_file")
+    parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger('').setLevel(logging.DEBUG)
+    else:
+        logging.getLogger('').setLevel(logging.INFO)
+    logging.getLogger('').addHandler(ch1)
+    logger = logging.getLogger("trollcast_client")
 
     serve(args.config_file)
         

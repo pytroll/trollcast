@@ -292,6 +292,10 @@ class Client(HaveBuffer):
                                                       CLIENT_TIMEOUT.seconds)
                     if sat not in satellites:
                         continue
+                    
+                    if sat not in sat_last_seen:
+                        logger.info("Start receiving data for " + sat)
+                    
                     sat_last_seen[sat] = datetime.utcnow()
                     logger.debug("Picking line " + " ".join([str(utctime),
                                                          str(senders)]))

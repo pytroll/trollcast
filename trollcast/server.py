@@ -55,11 +55,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK
 
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger("trollcast/server")
-logger.setLevel(logging.DEBUG)
-
+logger = logging.getLogger(__name__)
 
 LINE_SIZE = 11090 * 2
 
@@ -190,7 +186,9 @@ class FileStreamer(FileSystemEventHandler):
         self._coords = [float(self._coords[0]),
                         float(self._coords[1]),
                         float(self._coords[2])]
-        logger.debug(self._coords)
+        self._station = cfg.get("local_reception", "station")
+        logger.debug("Station " + self._station +
+                     " located at: " + str(self._coords))
         try:
             self._tle_files = cfg.get("local_reception", "tle_files")
         except NoOptionError:
@@ -201,21 +199,26 @@ class FileStreamer(FileSystemEventHandler):
         self.scanlines = holder
 
     def on_created(self, event):
+        """Callback when file is created.
+        """
         if event.src_path != self._filename:
-            logger.debug("Closing: " + self._filename)
+            if self._filename:
+                logger.info("Closing: " + self._filename)
             if self._file:
                 self._file.close()
             self._file = None
             self._filename = ""
             self._where = 0
             self._satellite = ""
-        logger.debug("Creating: " + event.src_path)
+        logger.info("New file detected: " + event.src_path)
 
 
     def on_opened(self, event):
+        """Callback when file is opened
+        """
         fname = os.path.split(event.src_path)[1]
         if self._file is None and fnmatch(fname, self._file_pattern):
-            logger.debug("Opening: " + event.src_path)
+            logger.info("File opened: " + event.src_path)
             self._filename = event.src_path
             self._file = open(event.src_path, "rb")
             self._where = 0
@@ -276,9 +279,9 @@ class FileStreamer(FileSystemEventHandler):
 
 
             elevation = self._orbital.get_observer_look(utctime, *self._coords)[1]
-            logger.info("Got line " + utctime.isoformat() + " "
-                        + self._satellite + " "
-                        + str(elevation))
+            logger.debug("Got line " + utctime.isoformat() + " "
+                         + self._satellite + " "
+                         + str(elevation))
 
 
             
@@ -503,9 +506,3 @@ def serve(configfile):
     if mirror is not None:
         mirror.stop()
         
-#     print "Thanks for using pytroll/trollcast. See you soon on www.pytroll.org!"
-
-# if __name__ == '__main__':
-#     import sys
-
-#     main(sys.argv[1])
