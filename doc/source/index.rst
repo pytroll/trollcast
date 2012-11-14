@@ -20,7 +20,9 @@ The protocol it uses is loosely based on bittorrent.
 
 Installing trollcast
 --------------------
-::
+
+Download trollcast from the `source code page
+<http://github.com/mraspaud/trollcast>`_ and run::
 
   python setup.py install
 
@@ -96,7 +98,7 @@ It is started with::
    trollcast_server my_config_file.cfg
 
 This will start a server that watches a given file, as specified in the
-configuration file. 
+configuration file. Add a ``-v`` if you want debugging info.
 
 .. note::
 
@@ -125,7 +127,7 @@ Here is the usage of the client::
                          Output file (used only in conjuction with -t)
    -f CONFIG_FILE, --config_file CONFIG_FILE
                          eg. sattorrent_local.cfg
-
+   -v, --verbose
 
 There are two ways of running the client:
  - The first way is to retrieve a given time interval of data. For example, to
