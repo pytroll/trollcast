@@ -43,7 +43,7 @@ running both the client and the server.
   max_connections=2
   station=norrköping
   coordinates=16.148649 58.581844 0.02
-  tle_dir=/var/opt/2met/data/polar/orbitalelements/
+  tle_files=/var/opt/2met/data/polar/orbitalelements/*.tle
   
   [safe]
   hostname=172.29.0.236
