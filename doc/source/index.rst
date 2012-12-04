@@ -75,7 +75,7 @@ The `local_reception` section
    each other, creating a more distributed load.
  - `station`: name of the station
  - `coordinates`: coordinates of the station. Used for the computation of
-   satellite elevation.
+   satellite elevation. Lon/lats in degrees, altitude in kilometers.
  - `tle_dir`: directory holding the latest TLE data. Used for the computation
    of satellite elevation.
 
