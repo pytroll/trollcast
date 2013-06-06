@@ -35,7 +35,6 @@ from posttroll.message import Message, strp_isoformat
 from posttroll.subscriber import Subscriber
 from zmq import Context, REQ, LINGER, Poller, POLLIN
 
-
 logger = logging.getLogger(__name__)
 
 # TODO: what if a scanline never arrives ? do we wait for it forever ?
@@ -44,7 +43,7 @@ logger = logging.getLogger(__name__)
 LINES_PER_SECOND = 6
 LINE_SIZE = 11090 * 2
 CLIENT_TIMEOUT = timedelta(seconds=5)
-
+REQ_TIMEOUT = 1000
 BUFFER_TIME = 2.0
 
 def create_subscriber(cfgfile):
@@ -131,13 +130,17 @@ def create_requesters(cfgfile):
     """
     cfg = ConfigParser()
     cfg.read(cfgfile)
+    station = cfg.get("local_reception", "station")
     requesters = {}
     for host in cfg.get("local_reception", "remotehosts").split():
-        host, port = (cfg.get(host, "hostname"),  cfg.get(host, "reqport"))
-        requesters[host] = Requester(host, port)
+        pubport = cfg.get(host, "pubport")
+        host, port = (cfg.get(host, "hostname"), cfg.get(host, "reqport"))
+        requesters[host] = Requester(host, port, station, pubport)
     host = cfg.get("local_reception", "localhost")
-    host, port = (cfg.get(host, "hostname"),  cfg.get(host, "reqport"))
-    requesters[host] = Requester(host, port)
+    pubport = cfg.get(host, "pubport")
+    host, port = (cfg.get(host, "hostname"), cfg.get(host, "reqport"))
+    url = "tcp://" + host + ":" + port
+    requesters[url] = Requester(host, port, station, pubport)
     return requesters
 
 class Requester(object):
@@ -145,9 +148,11 @@ class Requester(object):
     """Make a request connection, waiting to get scanlines .
     """
     
-    def __init__(self, host, port):
+    def __init__(self, host, port, station, pubport=None):
         self._host = host
         self._port = port
+        self._station = station
+        self._pubport = pubport
         self._context = Context()
         self._socket = self._context.socket(REQ)
         self._socket.setsockopt(LINGER, 1)
@@ -176,36 +181,48 @@ class Requester(object):
         else:
             raise IOError("Timeout from " + str(self._host) +
                           ":" + str(self._port))
+    def ping(self):
+        """Send a ping.
+        """
+
+        msg = Message('/oper/polar/direct_readout/' + self._station,
+                      'ping',
+                      {"station": self._station})
+        tic = datetime.now()
+        self.send(msg)
+        response = self.recv(REQ_TIMEOUT).data
+        toc = datetime.now()
+        return response["station"], toc - tic
         
     def get_line(self, satellite, utctime):
         """Get the scanline of *satellite* at *utctime*.
         """
-        msg = Message('/oper/polar/direct_readout/norrköping',
+        msg = Message('/oper/polar/direct_readout/' + self._station,
                       'request',
                       {"type": "scanline",
                        "satellite": satellite,
                        "utctime": utctime.isoformat()})
         self.send(msg)
-        return self.recv(1000).data
+        return self.recv(REQ_TIMEOUT).data
 
 
     def get_slice(self, satellite, start_time, end_time):
         """Get a slice of scanlines.
         """
-        msg = Message('/oper/polar/direct_readout/norrköping',
+        msg = Message('/oper/polar/direct_readout/' + self._station,
                       'request',
                       {"type": 'scanlines',
                        "satellite": satellite,
                        "start_time": start_time.isoformat(),
                        "end_time": end_time.isoformat()})
         self.send(msg)
-        return self.recv(1000).data
+        return self.recv(REQ_TIMEOUT).data
 
     def send_lineinfo(self, sat, utctime, elevation, filename, pos):
         """Send information to our own server.
         """
 
-        msg = Message('/oper/polar/direct_readout/norrköping',
+        msg = Message('/oper/polar/direct_readout/' + self._station,
                       'notice',
                       {"type": 'scanline',
                        "satellite": sat,
@@ -226,7 +243,7 @@ class HaveBuffer(Thread):
         self._hb = create_timers(cfgfile, self._sub)
         self.scanlines = {}
         self._queues = []
-        self._requesters = []
+        self._requesters = {}
         self._timers = {}
 
     def add_queue(self, queue):
@@ -287,9 +304,22 @@ class HaveBuffer(Thread):
                         len(self._requesters)):
                         self.send_to_queues(sat, utctime)
             elif(message.type == "heartbeat"):
-                sender = "tcp://" + message.sender.split("@")[1] + ":" + message.data["addr"].split(":")[1]
-                logger.debug("receive heartbeat from " + str(sender) +": " + str(message))
+                sender = ("tcp://" + message.sender.split("@")[1] +
+                          ":" + message.data["addr"].split(":")[1])
+                logger.debug("receive heartbeat from " + str(sender) +
+                             ": " + str(message))
                 self._hb[str(sender)].reset()
+                for addr, req in self._requesters.items():
+                    pubaddr = ":".join(addr.split(":")[:-1] +
+                                       [str(req._pubport)])
+                    if pubaddr == sender:
+                        rstation, rtime = req.ping()
+                        
+                        logger.info("ping roundtrip to " + rstation +
+                                    ": " + str(rtime.microseconds /1000.0) +
+                                    "ms")
+                        break
+
                 
                 
     def stop(self):

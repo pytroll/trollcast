@@ -336,6 +336,10 @@ class MirrorStreamer(Thread):
                                             message.data["elevation"],
                                             None,
                                             self._reqaddr)
+
+            if(message.type) == "heartbeat":
+                self.scanlines._socket.send(message)
+                
     def stop(self):
         """Stop streaming.
         """
@@ -488,7 +492,12 @@ class Responder(SocketLooperThread):
                                        "notice",
                                        "ack")
                     self._socket.send(str(resp))
-                
+                elif(message.type == "ping"):
+                    resp = Message('/oper/polar/direct_readout/'
+                                   + self._station,
+                                   "pong",
+                                   {"station": self._station})
+                    self._socket.send(str(resp))
     def stop(self):
         self._loop = False
 
