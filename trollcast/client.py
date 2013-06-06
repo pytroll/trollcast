@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 SMHI
+# Copyright (c) 2012, 2013 SMHI
 
 # Author(s):
 
@@ -123,7 +123,7 @@ class Requester(object):
                       'request',
                       {"type": "scanline",
                        "satellite": satellite,
-                       "utctime": utctime.isoformat()})
+                       "utctime": utctime})
         self.send(msg)
         return self.recv(1000).data
 
@@ -196,7 +196,10 @@ class HaveBuffer(Thread):
                 continue
             if(message.type == "have"):
                 sat = message.data["satellite"]
-                utctime = strp_isoformat(message.data["timecode"])
+                utctime = message.data["timecode"]
+                if isinstance(utctime, list):
+                    utctime = tuple(utctime)
+                    
                 # This should take care of address translation.
                 sender = (message.sender.split("@")[1] + ":" +
                           message.data["origin"].split(":")[1])
@@ -209,7 +212,7 @@ class HaveBuffer(Thread):
                     # sending to queue. In the case were the "have" messages of
                     # all servers were sent in less time, we should not be
                     # waiting...
-                    if len(self._requesters) == 1:
+                    if len(self._requesters) == 2:
                         self.send_to_queues(sat, utctime)
                     else:
                         timer = Timer(BUFFER_TIME,
@@ -291,6 +294,7 @@ class Client(HaveBuffer):
                     sat, utctime, senders = queue.get(True,
                                                       CLIENT_TIMEOUT.seconds)
                     if sat not in satellites:
+                        print sat, satellites
                         continue
                     
                     if sat not in sat_last_seen:
@@ -317,7 +321,10 @@ class Client(HaveBuffer):
                         logger.info(sat +
                                     " seems to be inactive now, writing file.")
                         first_time = min(sat_lines[sat].keys())
-                        filename = first_time.isoformat() + sat + ".hmf"
+                        try:
+                            filename = first_time.isoformat() + sat + ".hmf"
+                        except AttributeError:
+                            filename = first_time[1].isoformat() + sat + ".cadu"
                         with open(filename, "wb") as fp_:
                             for linetime in sorted(sat_lines[sat].keys()):
                                 fp_.write(sat_lines[sat][linetime])

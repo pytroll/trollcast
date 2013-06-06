@@ -28,6 +28,9 @@
 from datetime import datetime, timedelta
 import numpy as np
 
+import logging
+logger = logging.getLogger(__name__)
+
 table = np.array([0xff, 0x48, 0x0e, 0xc0, 0x9a, 0x0d, 0x70, 0xbc, 0x8e, 0x2c,
                   0x93, 0xad, 0xa7, 0xb7, 0x46, 0xce, 0x5a, 0x97, 0x7d, 0xcc,
                   0x32, 0xa2, 0xbf, 0x3e, 0x0a, 0x10, 0xf1, 0x88, 0x94, 0xcd,
@@ -82,9 +85,9 @@ def timecode(arr):
             + datetime(1958, 1, 1))
 
 
-spacecrafts = {0x2A: "terra",
-               0x9A: "aqua",
-               133: "npp"}
+spacecrafts = {0x2A: "TERRA",
+               0x9A: "AQUA",
+               65: "SUOMI NPP"}
 
 class CADUReader(object):
 
@@ -106,9 +109,12 @@ class CADUReader(object):
         vcount = (arr["vcdu count"][0] * 256 ** 2 +
                   arr["vcdu count"][1] * 256 +
                   arr["vcdu count"][2])
-
-        satellite = spacecrafts[(arr["version"] >> 6) & 255]
-
+        try:
+            satellite = spacecrafts[(arr["version"] >> 6) & 255]
+        except KeyError:
+            logger.info("spurious satellite number, skipping: " + str((arr["version"] >> 6) & 255))
+            return
+        
         arr = np.fromstring(packet[10:], dtype=m_pdu_hdr_type, count=1)[0]
         offset = (arr["hdr_ccsds_offset"] & (2**11 - 1))
         if offset != 2047:

@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 LINE_SIZE = 11090 * 2
 
-CACHE_SIZE = 32
+CACHE_SIZE = 320000000
 
 HRPT_SYNC = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224, 694,
         990, 220, 409, 1010, 403, 654, 105, 62, 867, 75, 149, 320, 725, 668,
@@ -124,11 +124,15 @@ class Holder(object):
         """
         to_send = {}
         to_send["satellite"] = satellite
-        to_send["timecode"] = utctime.isoformat()
+        try:
+            to_send["timecode"] = utctime.isoformat()
+        except AttributeError:
+            to_send["timecode"] = utctime[0], utctime[1].isoformat()
         to_send["elevation"] = elevation
         to_send["origin"] = self._addr
         msg = Message('/oper/polar/direct_readout/' + self._station, "have",
                       to_send).encode()
+        print "sending", msg
         self._socket.send(msg)
 
     def get_scanline(self, satellite, utctime):
@@ -216,8 +220,6 @@ class SocketStreamer(Thread):
             self._tle_files = None
 
     def update_satellite(self, satellite):
-        logger.debug(self._satellite)
-        logger.debug(satellite)
         if satellite != self._satellite:
             self._satellite = satellite
             if self._tle_files is not None:
@@ -225,14 +227,14 @@ class SocketStreamer(Thread):
                 tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
             else:
                 tle_file = None
-            logger.debug(self.satellite)
-            self._orbital = Orbital(self._satellite.upcase(), tle_file)
+            self._orbital = Orbital(self._satellite.upper(), tle_file)
 
     def run(self):
         buff = ""
         line_start = 0
         while self.loop:
             buff += self.conn.recv(1024)
+            #print ":".join("{0:x}".format(ord(c)) for c in buff)
             try:
                 res = None
                 while len(buff) > 1024:
@@ -245,12 +247,10 @@ class SocketStreamer(Thread):
                 if res is None:
                     continue
             except ValueError:
-                logger.debug(len(buff))
-                raise
                 continue
             elevation = self._orbital.get_observer_look(uid[1],
                                                         *self._coords)[1]
-            logger.debug("Got line " + str(uid) + " "
+            logger.debug("Got packet " + str(uid) + " "
                          + satellite + " "
                          + str(elevation))
             self.scanlines.add_scanline(self._satellite, uid,
@@ -553,7 +553,9 @@ class Responder(SocketLooperThread):
                 elif(message.type == "request" and
                      message.data["type"] == "scanline"):
                     sat = message.data["satellite"]
-                    utctime = strp_isoformat(message.data["utctime"])
+                    utctime = message.data["utctime"]
+                    if isinstance(utctime, list):
+                        utctime = tuple(utctime)
                     url = urlparse(self._holder[sat][utctime][1])
                     if url.scheme in ["", "file"]: # data is locally stored.
                         resp = Message('/oper/polar/direct_readout/'
