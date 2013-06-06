@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 SMHI
+# Copyright (c) 2012, 2013 SMHI
 
 # Author(s):
 
@@ -42,7 +42,7 @@ from ConfigParser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from glob import glob
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from urlparse import urlparse, urlunparse
 
 import numpy as np
@@ -123,6 +123,15 @@ class Holder(object):
         to_send["origin"] = self._addr
         msg = Message('/oper/polar/direct_readout/' + self._station, "have",
                       to_send).encode()
+        self._socket.send(msg)
+
+    def send_heartbeat(self, next_pass_time="unknown"):
+        to_send = {}
+        to_send["next_pass_time"] = next_pass_time
+        to_send["addr"] = self._addr
+        msg =  Message('/oper/polar/direct_readout/' + self._station,
+                       "heartbeat", to_send).encode()
+        logger.debug("sending heartbeat: " + str(msg))
         self._socket.send(msg)
 
     def get_scanline(self, satellite, utctime):
@@ -363,6 +372,23 @@ class SocketLooperThread(SocketLooper, Thread):
         Thread.__init__(self)
         SocketLooper.__init__(self, *args, **kwargs)
 
+class Heart(Thread):
+    def __init__(self, holder, *args, **kwargs):
+        Thread.__init__(self, *args, **kwargs)
+        self.loop = True
+        self.holder = holder
+        self.event = Event()
+        self.interval = 300
+
+    def run(self):
+        while self.loop:
+            self.holder.send_heartbeat()
+            self.event.wait(self.interval)
+
+    def stop(self):
+        self.loop = False
+        self.event.set()
+
 class Responder(SocketLooperThread):
 
     # TODO: this should not respond to everyone. It should check if the
@@ -472,6 +498,7 @@ def serve(configfile):
     """
 
     scanlines = Holder(configfile)
+    heartbeat = Heart(scanlines)
     fstreamer = FileStreamer(scanlines, configfile)
     notifier = Observer()
     cfg = ConfigParser()
@@ -485,7 +512,7 @@ def serve(configfile):
     responder = Responder(scanlines, configfile,
                           "tcp://*:" + responder_port, REP)
     responder.start()
-
+    heartbeat.start()
     mirror = None
     try:
         mirror = MirrorStreamer(scanlines, configfile)
@@ -501,6 +528,7 @@ def serve(configfile):
         notifier.stop()
     
     responder.stop()
+    heartbeat.stop()
     notifier.join()
 
     if mirror is not None:

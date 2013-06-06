@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 SMHI
+# Copyright (c) 2012, 2013 SMHI
 
 # Author(s):
 
@@ -28,7 +28,7 @@ import logging
 from ConfigParser import ConfigParser
 from Queue import Queue, Empty
 from datetime import timedelta, datetime
-from threading import Thread, Timer
+from threading import Thread, Timer, Event
 
 import numpy as np
 from posttroll.message import Message, strp_isoformat
@@ -64,6 +64,67 @@ def create_subscriber(cfgfile):
     logger.debug("Subscribing to " + str(addrs))
     return Subscriber(addrs, "hrpt 0", translate=True)
 
+class RTimer(Thread):
+    def __init__(self, tries, warning_message, function, *args, **kwargs):
+        Thread.__init__(self)
+        self.event = Event()
+        self.interval = 400
+        self.loop = True
+        self.tries = tries
+        self.attempt = 0
+        self.args=args
+        self.kwargs=kwargs
+        self.alert_func = function
+        self.warning = warning_message
+        
+    def reset(self):
+        self.event.set()
+        self.attempt = 0
+        
+    def alert(self):
+        self.attempt += 1
+        if self.attempt >= self.tries:
+            logger.warning(self.warning)
+            self.alert_func(*self.args, **self.kwargs)
+            self.reset()
+        else:
+            logger.warning(self.warning)
+            
+    def run(self):
+        while self.loop:
+            self.event.wait(self.interval)
+            if not self.event.is_set() and self.loop:
+                self.alert()
+            elif self.event.is_set():
+                self.event.clear()
+
+    def stop(self):
+        self.loop = False
+        self.event.set()
+                        
+
+def reset_subscriber(subscriber, addr):
+    logger.warning("Resetting connection to " + addr)
+    subscriber.reset(addr)
+
+def create_timers(cfgfile, subscriber):
+    cfg = ConfigParser()
+    cfg.read(cfgfile)
+    addrs = []
+    timers = {}
+    for host in cfg.get("local_reception", "remotehosts").split():
+        addrs.append("tcp://" +
+                     cfg.get(host, "hostname") + ":" + cfg.get(host, "pubport"))
+    localhost = cfg.get("local_reception", "localhost")
+    addrs.append("tcp://" +
+                 cfg.get(localhost, "hostname") + ":" +
+                 cfg.get(localhost, "pubport"))
+    for addr in addrs:        
+        timers[addr] = RTimer(1, addr+" seems to be down, no hearbeat received",
+                              reset_subscriber, subscriber, addr)
+    
+        timers[addr].start()
+    return timers
 
 def create_requesters(cfgfile):
     """Create requesters to all the configure remote hosts.
@@ -162,6 +223,7 @@ class HaveBuffer(Thread):
     def __init__(self, cfgfile="sattorrent.cfg"):
         Thread.__init__(self)
         self._sub = create_subscriber(cfgfile)
+        self._hb = create_timers(cfgfile, self._sub)
         self.scanlines = {}
         self._queues = []
         self._requesters = []
@@ -224,11 +286,18 @@ class HaveBuffer(Thread):
                     if (len(self.scanlines[sat][utctime]) ==
                         len(self._requesters)):
                         self.send_to_queues(sat, utctime)
+            elif(message.type == "heartbeat"):
+                sender = "tcp://" + message.sender.split("@")[1] + ":" + message.data["addr"].split(":")[1]
+                logger.debug("receive heartbeat from " + str(sender) +": " + str(message))
+                self._hb[str(sender)].reset()
+                
                 
     def stop(self):
         """Stop buffering.
         """
         self._sub.stop()
+        for timer in self._hb.values():
+            timer.stop()
 
 def compute_line_times(utctime, start_time, end_time):
     """Compute the times of lines if a swath order depending on a reference
