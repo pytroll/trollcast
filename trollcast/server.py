@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 SMHI
+# Copyright (c) 2012, 2013 SMHI
 
 # Author(s):
 
@@ -44,7 +44,7 @@ from fnmatch import fnmatch
 from glob import glob
 from threading import Thread, Lock
 from urlparse import urlparse, urlunparse
-
+import socket
 import numpy as np
 import time
 from posttroll import strp_isoformat
@@ -54,6 +54,12 @@ from pyorbital.orbital import Orbital
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK
+
+from trollcast.formats.cadu import CADUReader
+from trollcast.formats.hrpt import HRPTReader
+
+readers = {"cadu": CADUReader,
+           "hrpt": HRPTReader}
 
 logger = logging.getLogger(__name__)
 
@@ -166,9 +172,123 @@ class Holder(object):
                 self.send_have(satellite, utctime, elevation)
         finally:
             self._lock.release()
-        
 
-class FileStreamer(FileSystemEventHandler):
+class SocketStreamer(Thread):
+    """Get the updates from a socket.
+    """
+
+    def __init__(self, holder, configfile, *args, **kwargs):
+        Thread.__init__(self, *args, **kwargs)
+        self.loop = True
+        self._filename = ""
+        self._satellite = ""
+        self.configfile = configfile
+        cfg = ConfigParser()
+        cfg.read(self.configfile)
+        url = urlparse(cfg.get("local_reception", "url"))
+
+        host, port = url.netloc.split(":")
+        if host == "localhost":
+            host = ""
+        if url.scheme == "tcp":
+            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        elif url.scheme == "udp":
+            self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        else:
+            raise NotImplementedError("Only support tcp and udp for socket streams")
+
+        self.scanlines = holder
+        self._socket.bind((host, int(port)))
+        self._socket.listen(1)
+        self.conn, self.addr = self._socket.accept()
+        self.reader = readers[cfg.get("local_reception", "data")]()
+        self._orbital = None
+        self._coords = cfg.get("local_reception", "coordinates").split(" ")
+        self._coords = [float(self._coords[0]),
+                        float(self._coords[1]),
+                        float(self._coords[2])]
+        self._station = cfg.get("local_reception", "station")
+        logger.debug("Station " + self._station +
+                     " located at: " + str(self._coords))
+        try:
+            self._tle_files = cfg.get("local_reception", "tle_files")
+        except NoOptionError:
+            self._tle_files = None
+
+    def update_satellite(self, satellite):
+        logger.debug(self._satellite)
+        logger.debug(satellite)
+        if satellite != self._satellite:
+            self._satellite = satellite
+            if self._tle_files is not None:
+                filelist = glob(self._tle_files)
+                tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
+            else:
+                tle_file = None
+            logger.debug(self.satellite)
+            self._orbital = Orbital(self._satellite.upcase(), tle_file)
+
+    def run(self):
+        buff = ""
+        line_start = 0
+        while self.loop:
+            buff += self.conn.recv(1024)
+            try:
+                res = None
+                while len(buff) > 1024:
+                    res = self.reader.read(buff[:1024])
+                    buff = buff[1024:]
+                    if res is None:
+                        break
+                    uid, satellite, line = res
+                    self.update_satellite(satellite)
+                if res is None:
+                    continue
+            except ValueError:
+                logger.debug(len(buff))
+                raise
+                continue
+            elevation = self._orbital.get_observer_look(uid[1],
+                                                        *self._coords)[1]
+            logger.debug("Got line " + str(uid) + " "
+                         + satellite + " "
+                         + str(elevation))
+            self.scanlines.add_scanline(self._satellite, uid,
+                                        elevation, line_start, self._filename,
+                                        line)
+            line_start += len(line)
+            
+    def stop(self):
+        self.loop = False
+
+class FileStreamer(object):
+    """Get the updates from files.
+    """
+
+    def __init__(self, holder, configfile, *args, **kwargs):
+        self.fstreamer = _FileStreamer(holder, configfile, *args, **kwargs)
+        self.configfile = configfile
+        self.holder = holder
+        self.notifier = Observer()
+        url = urlparse(cfg.get("local_reception", "url"))
+        if url.scheme not in ["file", ""]:
+            raise NotImplementedError("No support for scheme " +
+                                      str(url.scheme))
+        self.path = url.path
+
+    def start(self):
+        cfg = ConfigParser()
+        cfg.read(self.configfile)
+        path = cfg.get("local_reception", "data_dir")
+        self.notifier.schedule(self.fstreamer, path, recursive=False)
+    
+    def stop(self):
+        self.notifier.stop()
+
+    def join(self):
+        self.notifier.join()
+        
+class _FileStreamer(FileSystemEventHandler):
     """Get the updates from files.
 
     TODO: separate holder from file handling.
@@ -229,7 +349,7 @@ class FileStreamer(FileSystemEventHandler):
                 tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
             else:
                 tle_file = None
-
+            
             self._orbital = Orbital(self._satellite, tle_file)
             
 
@@ -472,37 +592,32 @@ def serve(configfile):
     """
 
     scanlines = Holder(configfile)
-    fstreamer = FileStreamer(scanlines, configfile)
-    notifier = Observer()
+    
+    streamer = None
+    try:
+        streamer = MirrorStreamer(scanlines, configfile)
+    except NoOptionError:
+        try:
+            logger.debug("Choosing sockets")
+            streamer = SocketStreamer(scanlines, configfile)
+        except NotImplementedError:
+            streamer = FileStreamer(scanlines, configfile)
+            
     cfg = ConfigParser()
     cfg.read(configfile)
-    path = cfg.get("local_reception", "data_dir")
-    notifier.schedule(fstreamer, path, recursive=False)
-    
 
     local_station = cfg.get("local_reception", "localhost")
     responder_port = cfg.get(local_station, "reqport")
     responder = Responder(scanlines, configfile,
                           "tcp://*:" + responder_port, REP)
     responder.start()
-
-    mirror = None
-    try:
-        mirror = MirrorStreamer(scanlines, configfile)
-        mirror.start()
-    except NoOptionError:
-        pass
+    streamer.start()
     
-    notifier.start()
     try:
         while True:
             time.sleep(1)
-    except KeyboardInterrupt:
-        notifier.stop()
-    
-    responder.stop()
-    notifier.join()
+    finally:
+        streamer.stop()
+        responder.stop()
 
-    if mirror is not None:
-        mirror.stop()
         
