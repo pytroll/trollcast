@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 Martin Raspaud
+# Copyright (c) 2012, 2013 Martin Raspaud
 
 # Author(s):
 
@@ -40,7 +40,7 @@ setup(name="trollcast",
       description='Weather satellite data exchange tool',
       author='The pytroll team',
       author_email='martin.raspaud@smhi.se',
-      packages=['trollcast'],
+      packages=['trollcast', 'trollcast.formats'],
       scripts = ['bin/trollcast_client',
                  'bin/trollcast_server'],
       zip_safe=False,
