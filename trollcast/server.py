@@ -65,19 +65,6 @@ logger = logging.getLogger(__name__)
 
 CACHE_SIZE = 320000000
 
-def timecode(tc_array):
-    word = tc_array[0]
-    day = word
-    word = tc_array[1]
-    msecs = ((127) & word) * 1024
-    word = tc_array[2]
-    msecs += word & 1023
-    msecs *= 1024
-    word = tc_array[3]
-    msecs += word & 1023
-    # FIXME : should return current year !
-    return timedelta(days=int(day/2 - 1), milliseconds=int(msecs))
-
 class Holder(object):
 
     def __init__(self, configfile):
@@ -224,8 +211,8 @@ class SocketStreamer(Thread):
             #print ":".join("{0:x}".format(ord(c)) for c in buff)
             try:
                 res = None
-                while len(buff) > 1024:
-                    res = self.reader.read(buff[:1024])
+                while len(buff) >= 1024:
+                    res = self.reader.read_line(buff[:1024])
                     buff = buff[1024:]
                     if res is None:
                         break
@@ -234,6 +221,7 @@ class SocketStreamer(Thread):
                 if res is None:
                     continue
             except ValueError:
+                raise
                 continue
             elevation = self._orbital.get_observer_look(uid[1],
                                                         *self._coords)[1]
