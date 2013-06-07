@@ -96,7 +96,7 @@ class CADUReader(object):
     def __init__(self):
         self.timestamp = None
 
-    def read(self, raw_packet, decode=False):
+    def read_line(self, raw_packet, decode=False):
         if len(raw_packet) != 1024:
             raise ValueError("packet is not 1024 bytes long")
         if decode:

@@ -21,6 +21,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """Trollcast client. Leeches all it can :)
+
+Todo:
+Fix the have buffer (too many threads with cadu)
+Autodetection of the data format
+Busy waiting after socket streaming
+gather the cadu packets in 1 packet per timecode
 """
 from __future__ import with_statement 
 
@@ -43,7 +49,7 @@ logger = logging.getLogger(__name__)
 # FIXME: this should be configurable depending on the type of data.
 LINES_PER_SECOND = 6
 LINE_SIZE = 11090 * 2
-CLIENT_TIMEOUT = timedelta(seconds=5)
+CLIENT_TIMEOUT = timedelta(seconds=10)
 
 BUFFER_TIME = 2.0
 

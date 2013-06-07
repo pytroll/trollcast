@@ -23,7 +23,7 @@
 """Trollcast, server side.
 
 Trollcasting is loosely based on the bittorrent concepts, and adapted to
-satellite data.
+weather satellite data.
 
 Limitations:
  - HRPT specific at the moment
@@ -63,19 +63,7 @@ readers = {"cadu": CADUReader,
 
 logger = logging.getLogger(__name__)
 
-LINE_SIZE = 11090 * 2
-
 CACHE_SIZE = 320000000
-
-HRPT_SYNC = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224, 694,
-        990, 220, 409, 1010, 403, 654, 105, 62, 867, 75, 149, 320, 725, 668,
-        581, 866, 109, 166, 941, 1022, 59, 989, 182, 461, 197, 751, 359, 704,
-        66, 387, 238, 850, 746, 473, 573, 282, 6, 212, 169, 623, 761, 979, 338,
-        249, 448, 331, 911, 853, 536, 323, 703, 712, 370, 30, 900, 527, 977,
-        286, 158, 26, 796, 705, 100, 432, 515, 633, 77, 65, 489, 186, 101, 406,
-        560, 148, 358, 742, 113, 878, 453, 501, 882, 525, 925, 377, 324, 589,
-        594, 496, 972], dtype=np.uint16)
-HRPT_SYNC_START = np.array([644, 367, 860, 413, 527, 149], dtype=np.uint16)
 
 def timecode(tc_array):
     word = tc_array[0]
@@ -132,7 +120,6 @@ class Holder(object):
         to_send["origin"] = self._addr
         msg = Message('/oper/polar/direct_readout/' + self._station, "have",
                       to_send).encode()
-        print "sending", msg
         self._socket.send(msg)
 
     def get_scanline(self, satellite, utctime):
@@ -191,15 +178,15 @@ class SocketStreamer(Thread):
         cfg.read(self.configfile)
         url = urlparse(cfg.get("local_reception", "url"))
 
-        host, port = url.netloc.split(":")
-        if host == "localhost":
-            host = ""
         if url.scheme == "tcp":
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         elif url.scheme == "udp":
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         else:
             raise NotImplementedError("Only support tcp and udp for socket streams")
+        host, port = url.netloc.split(":")
+        if host == "localhost":
+            host = ""
 
         self.scanlines = holder
         self._socket.bind((host, int(port)))
@@ -266,21 +253,24 @@ class FileStreamer(object):
     """
 
     def __init__(self, holder, configfile, *args, **kwargs):
-        self.fstreamer = _FileStreamer(holder, configfile, *args, **kwargs)
         self.configfile = configfile
         self.holder = holder
         self.notifier = Observer()
-        url = urlparse(cfg.get("local_reception", "url"))
-        if url.scheme not in ["file", ""]:
+        cfg = ConfigParser()
+        cfg.read(configfile)
+        self.reader = readers[cfg.get("local_reception", "data")]()
+        self.fstreamer = _FileStreamer(holder, configfile, self.reader,
+                                       *args, **kwargs)
+        self.url = urlparse(cfg.get("local_reception", "url"))
+        if self.url.scheme not in ["file", ""]:
             raise NotImplementedError("No support for scheme " +
-                                      str(url.scheme))
-        self.path = url.path
+                                      str(self.url.scheme))
+        self.path = self.url.path
 
     def start(self):
-        cfg = ConfigParser()
-        cfg.read(self.configfile)
-        path = cfg.get("local_reception", "data_dir")
-        self.notifier.schedule(self.fstreamer, path, recursive=False)
+        self.notifier.schedule(self.fstreamer, os.path.dirname(self.path),
+                               recursive=False)
+        self.notifier.start()
     
     def stop(self):
         self.notifier.stop()
@@ -293,8 +283,9 @@ class _FileStreamer(FileSystemEventHandler):
 
     TODO: separate holder from file handling.
     """
-    def __init__(self, holder, configfile, *args, **kwargs):
+    def __init__(self, holder, configfile, reader, *args, **kwargs):
         FileSystemEventHandler.__init__(self, *args, **kwargs)
+        self._reader = reader
         self._file = None
         self._filename = ""
         self._where = 0
@@ -314,7 +305,8 @@ class _FileStreamer(FileSystemEventHandler):
         except NoOptionError:
             self._tle_files = None
 
-        self._file_pattern = cfg.get("local_reception", "file_pattern")
+        self.url = urlparse(cfg.get("local_reception", "url"))
+        self._file_pattern = os.path.basename(self.url.path)
         
         self.scanlines = holder
 
@@ -336,7 +328,7 @@ class _FileStreamer(FileSystemEventHandler):
     def on_opened(self, event):
         """Callback when file is opened
         """
-        fname = os.path.split(event.src_path)[1]
+        fname = os.path.basename(event.src_path)
         if self._file is None and fnmatch(fname, self._file_pattern):
             logger.info("File opened: " + event.src_path)
             self._filename = event.src_path
@@ -360,43 +352,12 @@ class _FileStreamer(FileSystemEventHandler):
             return
             
         self._file.seek(self._where)
-        line = self._file.read(LINE_SIZE)
-        while len(line) == LINE_SIZE:
+        line = self._file.read(self._reader.line_size)
+        while len(line) >= self._reader.line_size:
             line_start = self._where
             self._where = self._file.tell()
-            dtype = np.dtype([('frame_sync', '>u2', (6, )),
-                              ('id', [('id', '>u2'),
-                                      ('spare', '>u2')]),
-                              ('timecode', '>u2', (4, )),
-                              ('telemetry', [("ramp_calibration", '>u2', (5, )),
-                                             ("PRT", '>u2', (3, )),
-                                             ("ch3_patch_temp", '>u2'),
-                                             ("spare", '>u2'),]),
-                              ('back_scan', '>u2', (10, 3)),
-                              ('space_data', '>u2', (10, 5)),
-                              ('sync', '>u2'),
-                              ('TIP_data', '>u2', (520, )),
-                              ('spare', '>u2', (127, )),
-                              ('image_data', '>u2', (2048, 5)),
-                              ('aux_sync', '>u2', (100, ))])
-
-
-            array = np.fromstring(line, dtype=dtype)
-            if np.all(abs(HRPT_SYNC_START - 
-                          array["frame_sync"]) > 1):
-                array = array.newbyteorder()
-
-            # FIXME: this is bad!!!! Should not get the year from the filename
-            year = int(os.path.split(event.src_path)[1][:4])
-            utctime = datetime(year, 1, 1) + timecode(array["timecode"][0])
-
-            # Check that we receive real-time data
-            if not (np.all(array['aux_sync'] == HRPT_SYNC) and
-                    np.all(array['frame_sync'] == HRPT_SYNC_START)):
-                logger.info("Garbage line: " + str(utctime))
-                line = self._file.read(LINE_SIZE)
-                continue
-
+            utctime, satellite, newline = self._reader.read_line(line[:self._reader.line_size])
+            line = line[self._reader.line_size:]
 
             elevation = self._orbital.get_observer_look(utctime, *self._coords)[1]
             logger.debug("Got line " + utctime.isoformat() + " "
@@ -408,11 +369,11 @@ class _FileStreamer(FileSystemEventHandler):
             # TODO:
             # - serve also already present files
             # - timeout and close the file
-            self.scanlines.add_scanline(self._satellite, utctime,
+            self.scanlines.add_scanline(satellite, utctime,
                                         elevation, line_start, self._filename,
-                                        line)
+                                        newline)
 
-            line = self._file.read(LINE_SIZE)
+            line = self._file.read(self._reader.line_size)
 
         self._file.seek(self._where)        
 
@@ -600,10 +561,11 @@ def serve(configfile):
         streamer = MirrorStreamer(scanlines, configfile)
     except NoOptionError:
         try:
-            logger.debug("Choosing sockets")
             streamer = SocketStreamer(scanlines, configfile)
+            logger.debug("Getting data from a socket")
         except NotImplementedError:
             streamer = FileStreamer(scanlines, configfile)
+            logger.debug("Getting data from a file")
             
     cfg = ConfigParser()
     cfg.read(configfile)
@@ -618,6 +580,8 @@ def serve(configfile):
     try:
         while True:
             time.sleep(1)
+    except KeyboardInterrupt:
+        pass
     finally:
         streamer.stop()
         responder.stop()

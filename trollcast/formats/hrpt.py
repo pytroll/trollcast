@@ -24,11 +24,12 @@
 """
 
 import numpy as np
-import os.path
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
+
+satellites = {13: "NOAA 18"}
 
 class HRPTReader(object):
 
@@ -50,51 +51,45 @@ class HRPTReader(object):
 
     sync_start = np.array([644, 367, 860, 413, 527, 149], dtype=np.uint16)
 
-    def __init__(self, filename):
-        self._filename = filename
-        self._file = open(filename, "rb")
-        self._where = 0
-
-    def read(self):
-        self._file.seek(self._where)
-        line = self._file.read(self.line_size)
-        while len(line) == self.line_size:
-            line_start = self._where
-            self._where = self._file.tell()
-            dtype = np.dtype([('frame_sync', '>u2', (6, )),
-                              ('id', [('id', '>u2'),
-                                      ('spare', '>u2')]),
-                              ('timecode', '>u2', (4, )),
-                              ('telemetry', [("ramp_calibration", '>u2', (5, )),
-                                             ("PRT", '>u2', (3, )),
-                                             ("ch3_patch_temp", '>u2'),
-                                             ("spare", '>u2'),]),
-                              ('back_scan', '>u2', (10, 3)),
-                              ('space_data', '>u2', (10, 5)),
-                              ('sync', '>u2'),
-                              ('TIP_data', '>u2', (520, )),
-                              ('spare', '>u2', (127, )),
-                              ('image_data', '>u2', (2048, 5)),
-                              ('aux_sync', '>u2', (100, ))])
+    dtype = np.dtype([('frame_sync', '>u2', (6, )),
+                      ('id', [('id', '>u2'),
+                              ('spare', '>u2')]),
+                      ('timecode', '>u2', (4, )),
+                      ('telemetry', [("ramp_calibration", '>u2', (5, )),
+                                     ("PRT", '>u2', (3, )),
+                                     ("ch3_patch_temp", '>u2'),
+                                     ("spare", '>u2'),]),
+                      ('back_scan', '>u2', (10, 3)),
+                      ('space_data', '>u2', (10, 5)),
+                      ('sync', '>u2'),
+                      ('TIP_data', '>u2', (520, )),
+                      ('spare', '>u2', (127, )),
+                      ('image_data', '>u2', (2048, 5)),
+                      ('aux_sync', '>u2', (100, ))])
 
 
-            array = np.fromstring(line, dtype=dtype)
-            if np.all(abs(self.sync_start - 
-                          array["frame_sync"]) > 1):
-                array = array.newbyteorder()
+    def read_line(self, line):
+        if len(line) != self.line_size:
+            raise ValueError("packet length is incorrect")
+        array = np.fromstring(line, dtype=self.dtype)[0]
+        if np.all(abs(self.sync_start - 
+                      array["frame_sync"]) > 1):
+            array = array.newbyteorder()
 
-            # FIXME: this is bad!!!! Should not get the year from the filename
-            year = int(os.path.basename(event.src_path)[:4])
-            utctime = datetime(year, 1, 1) + timecode(array["timecode"][0])
+        satellite = satellites[(array["id"]["id"] >> 3) & 15]
 
-            # Check that we receive real-time data
-            if not (np.all(array['aux_sync'] == self.sync) and
-                    np.all(array['frame_sync'] == self.sync_start)):
-                logger.info("Garbage line: " + str(utctime))
-                line = self._file.read(self.line_size)
-                continue
+        # FIXME: this is bad!!!! Should not get the year from the filename
+        year = 2012
+        utctime = datetime(year, 1, 1) + timecode(array["timecode"])
 
-            yield line_start
+        # Check that we receive good data
+        if not (np.all(array['aux_sync'] == self.sync) and
+                np.all(array['frame_sync'] == self.sync_start)):
+            logger.info("Garbage line: " + str(utctime))
+            line = self._file.read(self.line_size)
+            return
+
+        return utctime, satellite, line
 
 
 def timecode(tc_array):
