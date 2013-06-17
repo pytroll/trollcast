@@ -338,7 +338,7 @@ class MirrorStreamer(Thread):
                                             self._reqaddr)
 
             if(message.type) == "heartbeat":
-                self.scanlines._socket.send(message)
+                self.scanlines._socket.send(str(message))
                 
     def stop(self):
         """Stop streaming.

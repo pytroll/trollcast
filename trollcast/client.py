@@ -140,7 +140,7 @@ def create_requesters(cfgfile):
     pubport = cfg.get(host, "pubport")
     host, port = (cfg.get(host, "hostname"), cfg.get(host, "reqport"))
     url = "tcp://" + host + ":" + port
-    requesters[url] = Requester(host, port, station, pubport)
+    requesters[host] = Requester(host, port, station, pubport)
     return requesters
 
 class Requester(object):
