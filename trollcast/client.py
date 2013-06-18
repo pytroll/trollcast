@@ -300,7 +300,6 @@ class Client(HaveBuffer):
                     sat, utctime, senders = queue.get(True,
                                                       CLIENT_TIMEOUT.seconds)
                     if sat not in satellites:
-                        print sat, satellites
                         continue
                     
                     if sat not in sat_last_seen:

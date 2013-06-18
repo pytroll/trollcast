@@ -207,11 +207,13 @@ class SocketStreamer(Thread):
         buff = ""
         line_start = 0
         while self.loop:
+            #logger.debug("next segment")
             buff += self.conn.recv(1024)
             #print ":".join("{0:x}".format(ord(c)) for c in buff)
             try:
                 res = None
                 while len(buff) >= 1024:
+                    #logger.debug("call from server")
                     res = self.reader.read_line(buff[:1024])
                     buff = buff[1024:]
                     if res is None:
@@ -221,9 +223,10 @@ class SocketStreamer(Thread):
                 if res is None:
                     continue
             except ValueError:
-                raise
+                logger.exception()
                 continue
-            elevation = self._orbital.get_observer_look(uid[1],
+            print uid
+            elevation = self._orbital.get_observer_look(uid,
                                                         *self._coords)[1]
             logger.debug("Got packet " + str(uid) + " "
                          + satellite + " "

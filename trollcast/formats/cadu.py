@@ -27,6 +27,7 @@
 
 from datetime import datetime, timedelta
 import numpy as np
+from trollcast.formats.reedsolomon import rs_correct_msg
 
 import logging
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ def decode_str(arr):
     return (np.fromstring(arr, np.uint8)^decoder[:len(arr)]).tostring()
 
 vcdu_pri_hdr_type = np.dtype([('frame_sync', '>u1', (4, )),
-                              ('version', '<u2'),
+                              ('version', '>u2'),
                               ('vcdu count', '>u1', (3, )),
                               ('replay', '>u1')])
 
@@ -78,6 +79,22 @@ ccsds_hdr_type = np.dtype([('ccsds_version', '>u2'),
                            ('milliseconds', '>u4'),
                            ('microseconds', '>u2')])
 
+def get_info(buff):
+    """print the detail of the packet in buffer.
+    """
+
+    arr1 = np.fromstring(buff, dtype=vcdu_pri_hdr_type, count=1)
+
+    print "sync", arr1["frame_sync"]
+    print "version number", arr1["version"] >> 14
+    print "spacecraft id", (arr1["version"] >> 6) & 255
+    print "vcid", (arr1["version"]) & 63
+    
+    #arr2 = np.fromstring(buff[10:], dtype=m_pdu_hdr_type, count=1)
+    #arr3 = np.fromstring(buff[12 + offset:], dtype=ccsds_hdr_type, count=1)
+
+    
+
 def timecode(arr):
     return (timedelta(days=arr['days'] * 1.0,
                       milliseconds=arr['milliseconds']
@@ -87,7 +104,7 @@ def timecode(arr):
 
 spacecrafts = {0x2A: "TERRA",
                0x9A: "AQUA",
-               65: "SUOMI NPP"}
+               157: "SUOMI NPP"}
 
 class CADUReader(object):
 
@@ -95,35 +112,97 @@ class CADUReader(object):
 
     def __init__(self):
         self.timestamp = None
+        self.satellite = None
+        self.decode = False
+        self.offset = 4
+        self.last_received = None
+        self.data = ""
 
-    def read_line(self, raw_packet, decode=False):
+    def reset(self):
+        """Reset the reader.
+        """
+        self.timestamp = None
+        self.satellite = None
+        self.decode = False
+        self.offset = 4
+        self.last_received = None
+        self.data = ""
+
+    def read_line(self, raw_packet, decode=None, decode_offset=None):
+        # TODO: apriori knowledge of satellite and encoding should be passed in
+        # here!
         if len(raw_packet) != 1024:
             raise ValueError("packet is not 1024 bytes long")
-        if decode:
-            packet = (raw_packet[:10] +
-                      decode_str(raw_packet[10:896]) +
+
+        if ((self.last_received is None) or
+            ((datetime.utcnow() - self.last_received) > timedelta(seconds=5))):
+            print "resetting"
+            self.reset()
+            
+        if decode is not None:
+            self.decode = decode
+        if decode_offset is not None:
+            self.offset = decode_offset
+        if self.decode:
+            packet = (raw_packet[:self.offset] +
+                      decode_str(raw_packet[self.offset:896]) +
                       raw_packet[896:])
         else:
             packet = raw_packet
+
+        #logger.debug("arg decode: " + str(decode) + ", offset: " + str(decode_offset))
+        #logger.debug("decode: " + str(self.decode) + ", offset: " + str(self.offset))
+        
         arr = np.fromstring(packet, dtype=vcdu_pri_hdr_type, count=1)[0]
         vcount = (arr["vcdu count"][0] * 256 ** 2 +
                   arr["vcdu count"][1] * 256 +
                   arr["vcdu count"][2])
         try:
+            # TODO: check also version number and VCID to be thorough
             satellite = spacecrafts[(arr["version"] >> 6) & 255]
+            #logger.debug("got " + satellite)
         except KeyError:
-            logger.info("spurious satellite number, skipping: " + str((arr["version"] >> 6) & 255))
+            if not self.decode: # Aqua, NPP
+                return self.read_line(raw_packet, True)
+            else:
+                logger.info("spurious satellite number, skipping: " + str((arr["version"] >> 6) & 255))
             return
         
         arr = np.fromstring(packet[10:], dtype=m_pdu_hdr_type, count=1)[0]
         offset = (arr["hdr_ccsds_offset"] & (2**11 - 1))
         if offset != 2047:
-            arr = np.fromstring(packet[12+offset:], dtype=ccsds_hdr_type,
-                                count=1)[0]
+            try:
+                arr = np.fromstring(packet[12+offset:], dtype=ccsds_hdr_type,
+                                    count=1)[0]
+            except ValueError:
+                if not self.decode and satellite=='TERRA': # Try Terra case
+                    return self.read_line(raw_packet, True, 10)
+                else:
+                    logger.info("Wrong offset: " + str(offset))
+                    return
         
             sec_hdr = (arr["ccsds_version"] >> 11) & 1
             if sec_hdr != 0:
-                self.timestamp = timecode(arr)
-        if self.timestamp is not None:
-            return (vcount, self.timestamp), satellite, raw_packet
+                new_timestamp = timecode(arr)
+                if new_timestamp is not None:
+                    logger.debug(str(abs(datetime.utcnow() - new_timestamp)))
+                    if abs(datetime.utcnow() - new_timestamp) > timedelta(days=360):
+                        return
+                    self.satellite = satellite
+                    self.last_received = datetime.utcnow()
+                    if self.timestamp == new_timestamp:
+                        self.data += raw_packet
+                    else:
+                        old_timestamp = self.timestamp
+                        self.timestamp = new_timestamp
+                        data = self.data
+                        self.data = raw_packet
+                        if old_timestamp is not None:
+                            return old_timestamp, satellite, data
+        # if self.timestamp is not None:
+        #     self.satellite = satellite
+        #     self.decode = decode
+        #     self.offset = decode_offset
+        #     self.last_received = datetime.utcnow()
+        #     return (vcount, self.timestamp), satellite, raw_packet
 
