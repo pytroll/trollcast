@@ -102,7 +102,7 @@ class Holder(object):
         try:
             to_send["timecode"] = utctime.isoformat()
         except AttributeError:
-            to_send["timecode"] = utctime[0], utctime[1].isoformat()
+            to_send["timecode"] = utctime[0], utctime[1], utctime[2].isoformat()
         to_send["elevation"] = elevation
         to_send["origin"] = self._addr
         msg = Message('/oper/polar/direct_readout/' + self._station, "have",
@@ -301,6 +301,16 @@ class _FileStreamer(FileSystemEventHandler):
         
         self.scanlines = holder
 
+    def update_satellite(self, satellite):
+        if satellite != self._satellite:
+            self._satellite = satellite
+            if self._tle_files is not None:
+                filelist = glob(self._tle_files)
+                tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
+            else:
+                tle_file = None
+            self._orbital = Orbital(self._satellite.upper(), tle_file)
+
     def on_created(self, event):
         """Callback when file is created.
         """
@@ -325,16 +335,7 @@ class _FileStreamer(FileSystemEventHandler):
             self._filename = event.src_path
             self._file = open(event.src_path, "rb")
             self._where = 0
-            self._satellite = " ".join(event.src_path.split("_")[1:3])[:-5]
-
-            if self._tle_files is not None:
-                filelist = glob(self._tle_files)
-                tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
-            else:
-                tle_file = None
-            
-            self._orbital = Orbital(self._satellite, tle_file)
-            
+            self._satellite = ""
 
     def on_modified(self, event):
         self.on_opened(event)
@@ -347,20 +348,29 @@ class _FileStreamer(FileSystemEventHandler):
         while len(line) >= self._reader.line_size:
             line_start = self._where
             self._where = self._file.tell()
-            utctime, satellite, newline = self._reader.read_line(line[:self._reader.line_size])
-            line = line[self._reader.line_size:]
-
+            try:
+                utctime, satellite, newline = self._reader.read_line(line[:self._reader.line_size])
+            except TypeError:
+                continue
+            finally:
+                line = line[self._reader.line_size:]
+                
+            uid = utctime
+            if isinstance(utctime, (tuple, list)):
+                utctime = uid[-1]
+                
+            self.update_satellite(satellite)
+            
             elevation = self._orbital.get_observer_look(utctime, *self._coords)[1]
             logger.debug("Got line " + utctime.isoformat() + " "
                          + self._satellite + " "
                          + str(elevation))
 
-
             
             # TODO:
             # - serve also already present files
             # - timeout and close the file
-            self.scanlines.add_scanline(satellite, utctime,
+            self.scanlines.add_scanline(satellite, uid,
                                         elevation, line_start, self._filename,
                                         newline)
 

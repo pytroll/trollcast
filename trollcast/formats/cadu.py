@@ -23,11 +23,16 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """Reader for the cadu format.
+
+'Joint Polar Satellite System (JPSS) Common Data Format Control Book – External
+(CDFCB-X) Volume VII – Part 1 JPSS Downlink Data Formats'
+
+
 """
 
 from datetime import datetime, timedelta
 import numpy as np
-from trollcast.formats.reedsolomon import rs_correct_msg
+from trollcast.formats.reedsolomon import *
 
 import logging
 logger = logging.getLogger(__name__)
@@ -77,7 +82,16 @@ ccsds_hdr_type = np.dtype([('ccsds_version', '>u2'),
                            ('packet_length', '>u2'),
                            ('days', '>u2'),
                            ('milliseconds', '>u4'),
-                           ('microseconds', '>u2')])
+                           ('microseconds', '>u2'),
+                           ('seq_count', '>u1'),
+                           ('spare', '>u1')])
+
+ccsds_pri_hdr_type = np.dtype([('ccsds_version', '>u2'),
+                               ('sequence', '>u2'),
+                               ('packet_length', '>u2')])
+ccsds_sec_hdr_type = np.dtype([('days', '>u2'),
+                               ('milliseconds', '>u4'),
+                               ('microseconds', '>u2')])
 
 def get_info(buff):
     """print the detail of the packet in buffer.
@@ -96,6 +110,8 @@ def get_info(buff):
     
 
 def timecode(arr):
+    #print bin(arr['days']), bin(arr['milliseconds']), bin(arr['microseconds'])
+    #print arr['days'], arr['milliseconds'], arr['microseconds']
     return (timedelta(days=arr['days'] * 1.0,
                       milliseconds=arr['milliseconds']
                       + arr['microseconds'] / 1000.0)
@@ -104,24 +120,25 @@ def timecode(arr):
 
 spacecrafts = {0x2A: "TERRA",
                0x9A: "AQUA",
-               157: "SUOMI NPP"}
+               0x9D: "SUOMI NPP"}
 
 class CADUReader(object):
 
     line_size = 1024
 
     def __init__(self):
-        self.timestamp = None
+        self.timestamp = {}
         self.satellite = None
         self.decode = False
         self.offset = 4
         self.last_received = None
         self.data = ""
+        self.vcids = {}
 
     def reset(self):
         """Reset the reader.
         """
-        self.timestamp = None
+        self.timestamp = {}
         self.satellite = None
         self.decode = False
         self.offset = 4
@@ -136,7 +153,7 @@ class CADUReader(object):
 
         if ((self.last_received is None) or
             ((datetime.utcnow() - self.last_received) > timedelta(seconds=5))):
-            print "resetting"
+            logger.info("resetting")
             self.reset()
             
         if decode is not None:
@@ -150,59 +167,264 @@ class CADUReader(object):
         else:
             packet = raw_packet
 
-        #logger.debug("arg decode: " + str(decode) + ", offset: " + str(decode_offset))
-        #logger.debug("decode: " + str(self.decode) + ", offset: " + str(self.offset))
-        
         arr = np.fromstring(packet, dtype=vcdu_pri_hdr_type, count=1)[0]
         vcount = (arr["vcdu count"][0] * 256 ** 2 +
                   arr["vcdu count"][1] * 256 +
                   arr["vcdu count"][2])
+        vcid = arr["version"] & 63
+        #logger.debug(str(vcid) + " " + str(vcount))
         try:
             # TODO: check also version number and VCID to be thorough
             satellite = spacecrafts[(arr["version"] >> 6) & 255]
-            #logger.debug("got " + satellite)
         except KeyError:
             if not self.decode: # Aqua, NPP
                 return self.read_line(raw_packet, True)
             else:
                 logger.info("spurious satellite number, skipping: " + str((arr["version"] >> 6) & 255))
             return
+
+        self.vcids.setdefault(vcid, []).append(vcount)
         
         arr = np.fromstring(packet[10:], dtype=m_pdu_hdr_type, count=1)[0]
         offset = (arr["hdr_ccsds_offset"] & (2**11 - 1))
         if offset != 2047:
             try:
-                arr = np.fromstring(packet[12+offset:], dtype=ccsds_hdr_type,
+                arr = np.fromstring(packet[12+offset:], dtype=ccsds_pri_hdr_type,
                                     count=1)[0]
+                offset += 6
             except ValueError:
                 if not self.decode and satellite=='TERRA': # Try Terra case
                     return self.read_line(raw_packet, True, 10)
                 else:
                     logger.info("Wrong offset: " + str(offset))
                     return
-        
+
+            packet_length = arr["packet_length"]
             sec_hdr = (arr["ccsds_version"] >> 11) & 1
             if sec_hdr != 0:
+                arr = np.fromstring(packet[12+offset:], dtype=ccsds_sec_hdr_type,
+                                    count=1)[0]
                 new_timestamp = timecode(arr)
                 if new_timestamp is not None:
-                    logger.debug(str(abs(datetime.utcnow() - new_timestamp)))
                     if abs(datetime.utcnow() - new_timestamp) > timedelta(days=360):
                         return
                     self.satellite = satellite
                     self.last_received = datetime.utcnow()
-                    if self.timestamp == new_timestamp:
-                        self.data += raw_packet
-                    else:
-                        old_timestamp = self.timestamp
-                        self.timestamp = new_timestamp
-                        data = self.data
-                        self.data = raw_packet
-                        if old_timestamp is not None:
-                            return old_timestamp, satellite, data
-        # if self.timestamp is not None:
-        #     self.satellite = satellite
-        #     self.decode = decode
-        #     self.offset = decode_offset
-        #     self.last_received = datetime.utcnow()
-        #     return (vcount, self.timestamp), satellite, raw_packet
+                    self.timestamp[vcid] = new_timestamp
+                    return (vcid, vcount, new_timestamp), satellite, packet
+                
+        return (vcid, vcount, self.timestamp[vcid]), satellite, packet
 
+def dict_ccsds_pri(arr):
+    apid =  (arr['ccsds_version']) & 0x7ff
+    sec_hdr = (arr["ccsds_version"] >> 11) & 1
+    packet_type = (arr["ccsds_version"] >> 12) & 1
+    version = (arr["ccsds_version"] >> 13)
+    packet_count = arr["sequence"] & 0x3fff
+    sequence = arr["sequence"] >> 14
+    packet_length = arr["packet_length"]
+    return {"version":  version,
+            "type": packet_type,
+            "secondary_header": sec_hdr,
+            "apid": apid,
+            "packet_count": packet_count,
+            "sequence": sequence,
+            "packet_length": packet_length}
+
+def repr_ccsds_pri(arr):
+    apid =  (arr['ccsds_version']) & 0x7ff
+    sec_hdr = (arr["ccsds_version"] >> 11) & 1
+    packet_type = (arr["ccsds_version"] >> 12) & 1
+    version = (arr["ccsds_version"] >> 13)
+    return ("version: " + str(version) + "\n" +
+            "type: " + str(packet_type) + "\n" +
+            "secondary header: " + str(sec_hdr) + "\n" +
+            "apid: " + str(apid))
+
+vcids = {"TERRA":
+         {0x2A: "MODIS",
+          0x29: "MISR",
+          0x3F: "fill"},
+         "AQUA":
+         {0x1E: "MODIS"},
+         "SUOMI NPP":
+         {0xFF: "fill cadu",
+          0x3F: "fill vcdu"}
+         }
+
+frames = {}
+delcnt = 0
+pcnt = 0
+
+def read_frame(data):
+    global frames
+    global delcnt
+    global pcnt
+    offset = 4
+    import struct
+    #new_data = bytearray(decode_str(data))
+    new_data = bytearray(data)
+
+    # VCDU primary header
+
+    vcdu_pri_hdr = np.dtype([('version', '>u2'),
+                             ('vcdu count', '>u1', (3, )),
+                             ('replay', '>u1')])
+    arr1 = np.fromstring(str(new_data[offset:]), dtype=vcdu_pri_hdr, count=1)
+    version_number = arr1["version"][0] >> 14
+    spacecraft_id = ((arr1["version"][0] >> 6) & 255)
+    if version_number != 1 or spacecraft_id not in spacecrafts:
+        #print "decoding"
+        new_data = bytearray(decode_str(data))
+        
+    arr1 = np.fromstring(str(new_data[offset:]), dtype=vcdu_pri_hdr, count=1)
+    version_number = arr1["version"][0] >> 14
+    spacecraft_id = ((arr1["version"][0] >> 6) & 255)
+    vcid = arr1["version"][0] & 0x3f
+    if version_number != 1 or spacecraft_id not in spacecrafts:
+        print "hopeless, giving up"
+    try:
+        spacecraft_name = spacecrafts[spacecraft_id]
+    except KeyError:
+        spacecraft_name = "unknown"
+        
+    try:
+        instrument = vcids[spacecraft_name][vcid]
+    except KeyError:
+        instrument = "unknown"
+
+    truc = bytearray("\0\0\0\0")
+    truc[1] = arr1["vcdu count"][0][0]
+    truc[2] = arr1["vcdu count"][0][1]
+    truc[3] = arr1["vcdu count"][0][2]
+    offset += 6
+
+    # VCDU insert zone
+
+    # only for jpss
+    if spacecraft_name.startswith("JPSS"):
+        vcdu_insert_zone = np.dtype([('vcdu count', '>u1'),
+                                     ('key', '>u2'),
+                                     ('spare', '>u1')])
+        arr1 = np.fromstring(str(new_data[offset:]), dtype=vcdu_insert_zone, count=1)
+        truc[0] = arr1["vcdu count"][0]
+        offset += 4
+
+    vcount = struct.unpack(">I", str(truc))[0]
+
+    # MPDU primary header
+
+    arr1 = np.fromstring(str(new_data[offset:]), dtype=m_pdu_hdr_type, count=1)
+    if arr1["hdr_ccsds_offset"][0] >> 11 != 0:
+        print "MPDU spare corrupted"
+
+    fhp = arr1["hdr_ccsds_offset"][0] & 0x7ff
+    if fhp == 2047:
+        return
+    if fhp == 2046:
+        return
+    if fhp <= 2045:
+        offset += fhp
+
+    offset += 2
+
+    # CCSDS primary header
+
+
+    # ccsds_hdr_type = np.dtype([('ccsds_version', '>u2'),
+    #                        ('sequence', '>u2'),
+    #                        ('packet_length', '>u2'),
+    #                        ('days', '>u2'),
+    #                        ('milliseconds', '>u4'),
+    #                        ('microseconds', '>u2')])
+
+    arr1 = np.fromstring(str(new_data[offset:]), dtype=ccsds_hdr_type, count=1)[0]
+    #print arr1
+
+    version_number = arr1['ccsds_version'] >> 13
+    packet_type = (arr1['ccsds_version'] >> 12) & 1
+    secondary_header = (arr1['ccsds_version'] >> 11) & 1
+    apid =  (arr1['ccsds_version']) & 0x7ff
+    if version_number != 0 and packet_type != 0:
+        raise ValueError("Invalid version number and packet type.")
+    #print "version number", arr1['ccsds_version'] >> 13
+    #print "type", (arr1['ccsds_version'] >> 12) & 1
+    #print "second header flag", (arr1['ccsds_version'] >> 11) & 1
+    #print "apid", (arr1['ccsds_version']) & 0x7ff
+
+    seq_flag = arr1['sequence'] >> 14
+    seq_cnt = arr1['sequence'] & 0x3fff
+
+    # CCSDS secondary header
+
+    if secondary_header:
+        timestamp = timecode(arr1)
+        frames[vcid] = [timestamp, seq_flag]
+        print vcid, timestamp
+    else:
+        timestamp = None
+        if vcid in frames:
+            frames[vcid][1] = seq_flag
+
+    # if apid in frames:
+    #     print apid, seq_cnt, "/", frames[apid]
+    # else:
+    #     print apid, seq_cnt, "/ ?"
+
+    # if seq_flag == 0b00:
+    #     print "continuation"
+    # elif seq_flag == 0b01:
+    #     print "first"
+    # elif seq_flag == 0b10:
+    #     print "last"
+    # elif seq_flag == 0b11:
+    #     print "standalone/fill"
+
+    if vcid in frames:
+        #print spacecraft_name, instrument, "seq", vcid, vcount, frames[vcid]
+        pcnt += 1
+    else:
+        #print "throwing away", spacecraft_name, instrument, "seq", vcid, vcount
+        delcnt += 1
+    #print delcnt, pcnt
+
+    
+
+    #raw_input()
+    #if not secondary_header:
+    #    return
+
+
+
+    
+    
+    #print np.uint32(arr1["vcdu count"][0][0]) << 16 + np.uint32(arr1["vcdu count"][0][1]) << 8 + arr1["vcdu count"][0][2]
+
+    
+    
+    
+
+def read_cadu(fname):
+    print fname
+    data = 1
+    cr = CADUReader()
+    with open(fname, "rb") as fp_:
+        try:
+            while data:
+                data = fp_.read(1024)
+                if ord(data[0]) != 0x1a and ord(data[1]) != 0xcf and ord(data[2]) != 0xfc and ord(data[3]) != 0x1d:
+                    logger.warning("jammed sync")
+                #read_frame(data)
+                cr.read_line(data)
+        except IndexError:
+            logger.exception("Unexpected end of file")
+    return cr
+if __name__ == '__main__':
+    
+    import sys
+    logging.basicConfig(level=logging.DEBUG)
+    logger = logging.getLogger("cadu")
+    filename = sys.argv[1]
+
+    CR = read_cadu(filename)
+    

@@ -218,7 +218,7 @@ class HaveBuffer(Thread):
                     # sending to queue. In the case were the "have" messages of
                     # all servers were sent in less time, we should not be
                     # waiting...
-                    if len(self._requesters) == 2:
+                    if len(self._requesters) <= 2:
                         self.send_to_queues(sat, utctime)
                     else:
                         timer = Timer(BUFFER_TIME,
@@ -329,7 +329,7 @@ class Client(HaveBuffer):
                         try:
                             filename = first_time.isoformat() + sat + ".hmf"
                         except AttributeError:
-                            filename = first_time[1].isoformat() + sat + ".cadu"
+                            filename = first_time[-1].isoformat() + sat + ".cadu"
                         with open(filename, "wb") as fp_:
                             for linetime in sorted(sat_lines[sat].keys()):
                                 fp_.write(sat_lines[sat][linetime])
@@ -361,7 +361,7 @@ class Client(HaveBuffer):
 
         saved = []
 
-
+        # FIXME won't work for cadu
         # Create a file of the right length, filled with zeros. The alternative
         # would be to store all the scanlines in memory.
         tsize = (end_time - start_time).seconds * LINES_PER_SECOND * LINE_SIZE
