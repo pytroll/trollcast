@@ -100,9 +100,9 @@ class Holder(object):
         to_send = {}
         to_send["satellite"] = satellite
         try:
-            to_send["timecode"] = utctime.isoformat()
+            to_send["uid"] = utctime.isoformat()
         except AttributeError:
-            to_send["timecode"] = utctime[0], utctime[1], utctime[2].isoformat()
+            to_send["uid"] = utctime[0], utctime[1], utctime[2].isoformat()
         to_send["elevation"] = elevation
         to_send["origin"] = self._addr
         msg = Message('/oper/polar/direct_readout/' + self._station, "have",
@@ -360,7 +360,6 @@ class _FileStreamer(FileSystemEventHandler):
                 utctime = uid[-1]
                 
             self.update_satellite(satellite)
-            
             elevation = self._orbital.get_observer_look(utctime, *self._coords)[1]
             logger.debug("Got line " + utctime.isoformat() + " "
                          + self._satellite + " "
@@ -403,9 +402,9 @@ class MirrorStreamer(Thread):
             if message is None:
                 continue
             if(message.type == "have"):
-                logger.debug("Relaying " + str(message.data["timecode"]))
+                logger.debug("Relaying " + str(message.data["uid"]))
                 self.scanlines.add_scanline(message.data["satellite"],
-                                            strp_isoformat(message.data["timecode"]),
+                                            message.data["uid"],
                                             message.data["elevation"],
                                             None,
                                             self._reqaddr)
