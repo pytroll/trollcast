@@ -407,6 +407,7 @@ def read_frame(data):
 def read_cadu(fname):
     print fname
     data = 1
+    lines = []
     cr = CADUReader()
     with open(fname, "rb") as fp_:
         try:
@@ -415,10 +416,16 @@ def read_cadu(fname):
                 if ord(data[0]) != 0x1a and ord(data[1]) != 0xcf and ord(data[2]) != 0xfc and ord(data[3]) != 0x1d:
                     logger.warning("jammed sync")
                 #read_frame(data)
-                cr.read_line(data)
+                line = cr.read_line(data)
+                if line:
+                    lines.append(line)
         except IndexError:
             logger.exception("Unexpected end of file")
-    return cr
+    return lines
+
+def jam_lines(lines):
+    np.random.shuffle(lines)
+
 if __name__ == '__main__':
     
     import sys
@@ -426,5 +433,5 @@ if __name__ == '__main__':
     logger = logging.getLogger("cadu")
     filename = sys.argv[1]
 
-    CR = read_cadu(filename)
+    lines = read_cadu(filename)
     
