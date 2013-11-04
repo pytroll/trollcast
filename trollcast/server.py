@@ -288,10 +288,6 @@ class FileStreamer(FileSystemEventHandler):
                           array["frame_sync"]) > 1):
                 array = array.newbyteorder()
                 
-            satellite = SATELLITES[((array["id"]["id"] >> 3) & 15)[0]]
-            self.update_satellite(satellite)
-
-            
             # FIXME: this means server can only share 1 year of hrpt data.
             now = datetime.utcnow()
             year = now.year
@@ -312,6 +308,9 @@ class FileStreamer(FileSystemEventHandler):
                 logger.warning("Data is more than a week old: " + str(utctime))
                 self._warn = False
                 
+            satellite = SATELLITES[((array["id"]["id"] >> 3) & 15)[0]]
+            self.update_satellite(satellite)
+
             elevation = self._orbital.get_observer_look(utctime,
                                                         *self._coords)[1]
             logger.debug("Got line " + utctime.isoformat() + " "
