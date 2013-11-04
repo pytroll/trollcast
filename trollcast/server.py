@@ -71,6 +71,11 @@ HRPT_SYNC = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224, 694,
         594, 496, 972], dtype=np.uint16)
 HRPT_SYNC_START = np.array([644, 367, 860, 413, 527, 149], dtype=np.uint16)
 
+SATELLITES = {7: "NOAA 15",
+              3: "NOAA 16",
+              13: "NOAA 18",
+              15: "NOAA 19"}
+
 def timecode(tc_array):
     word = tc_array[0]
     day = word
@@ -81,7 +86,6 @@ def timecode(tc_array):
     msecs *= 1024
     word = tc_array[3]
     msecs += word & 1023
-    # FIXME : should return current year !
     return timedelta(days=int(day/2 - 1), milliseconds=int(msecs))
 
 class Holder(object):
@@ -207,6 +211,20 @@ class FileStreamer(FileSystemEventHandler):
         
         self.scanlines = holder
 
+        self._warn = True
+        
+    def update_satellite(self, satellite):
+        """Update satellite and renew the orbital instance.
+        """
+        if satellite != self._satellite:
+            self._satellite = satellite
+            if self._tle_files is not None:
+                filelist = glob(self._tle_files)
+                tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
+            else:
+                tle_file = None
+            self._orbital = Orbital(self._satellite.upper(), tle_file)
+
     def on_created(self, event):
         """Callback when file is created.
         """
@@ -219,6 +237,7 @@ class FileStreamer(FileSystemEventHandler):
             self._filename = ""
             self._where = 0
             self._satellite = ""
+            self._warn = True
         logger.info("New file detected: " + event.src_path)
 
 
@@ -231,16 +250,10 @@ class FileStreamer(FileSystemEventHandler):
             self._filename = event.src_path
             self._file = open(event.src_path, "rb")
             self._where = 0
-            self._satellite = " ".join(event.src_path.split("_")[1:3])[:-5]
+            self._satellite = ""
 
-            if self._tle_files is not None:
-                filelist = glob(self._tle_files)
-                tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
-            else:
-                tle_file = None
-
-            self._orbital = Orbital(self._satellite, tle_file)
-            
+            self._orbital = None
+            self._warn = True
 
     def on_modified(self, event):
         self.on_opened(event)
@@ -274,6 +287,9 @@ class FileStreamer(FileSystemEventHandler):
             if np.all(abs(HRPT_SYNC_START - 
                           array["frame_sync"]) > 1):
                 array = array.newbyteorder()
+                
+            satellite = SATELLITES[((array["id"]["id"] >> 3) & 15)[0]]
+            self.update_satellite(satellite)
 
             # FIXME: this is bad!!!! Should not get the year from the filename
             year = int(os.path.split(event.src_path)[1][:4])
@@ -286,8 +302,12 @@ class FileStreamer(FileSystemEventHandler):
                 line = self._file.read(LINE_SIZE)
                 continue
 
-
-            elevation = self._orbital.get_observer_look(utctime, *self._coords)[1]
+            if (now - utctime).days > 7 and self._warn:
+                logger.warning("Data is more than a week old: " + str(utctime))
+                self._warn = False
+                
+            elevation = self._orbital.get_observer_look(utctime,
+                                                        *self._coords)[1]
             logger.debug("Got line " + utctime.isoformat() + " "
                          + self._satellite + " "
                          + str(elevation))
