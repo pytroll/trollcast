@@ -291,9 +291,15 @@ class FileStreamer(FileSystemEventHandler):
             satellite = SATELLITES[((array["id"]["id"] >> 3) & 15)[0]]
             self.update_satellite(satellite)
 
-            # FIXME: this is bad!!!! Should not get the year from the filename
-            year = int(os.path.split(event.src_path)[1][:4])
+            
+            # FIXME: this means server can only share 1 year of hrpt data.
+            now = datetime.utcnow()
+            year = now.year
             utctime = datetime(year, 1, 1) + timecode(array["timecode"][0])
+            if utctime > now:
+                # Can't have data from the future... yet :)
+                utctime = (datetime(year - 1, 1, 1)
+                           + timecode(array["timecode"][0]))
 
             # Check that we receive real-time data
             if not (np.all(array['aux_sync'] == HRPT_SYNC) and
