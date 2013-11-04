@@ -24,7 +24,7 @@
 """
 
 __major__ = "0"
-__release__ = "1"
+__release__ = "2"
 __patch__ = "0"
 
 __version__ = "v" + ".".join([__major__,  __release__, __patch__])
