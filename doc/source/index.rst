@@ -10,13 +10,18 @@ To the `source code page <http://github.com/mraspaud/trollcast>`_.
 
 Trollcast is a tool to exchange polar weather satellite data. It aims at
 providing near real time data transfer between peers, and should be adaptable
-to any type of data that is scan-based. At the moments it works on hrpt minor
-frame data (both big and little endian).
+to any type of data that is scan-based. At the moments it works on 16-bits hrpt
+minor frame data (both big and little endian).
 
 The protocol it uses is loosely based on bittorrent.
 
 .. warning::
   This is experimental software, use it at your own risk!
+
+.. Contents:
+
+  .. toctree::
+     :maxdepth: 2
 
 Installing trollcast
 --------------------
@@ -62,8 +67,8 @@ The `local_reception` section
    locally. This name will be user further down in the configuration file as a
    section which will hold information about the host. More on this later.
  - `remotehosts` is the list of remote hosts to communicate with.
- - `data` give the type of data to be exchange. Only *hrpt* is available at the
-   moment.
+ - `data` give the type of data to be exchanged. Only *hrpt* is available at
+   the moment.
  - `data_dir` is the place where streaming data from the reception station is
    written. 
  - `file_pattern` is the fnmatch pattern to use to detect the file that the
@@ -95,6 +100,7 @@ Server mode, giving out data to the world
 The server mode is used to serve data to remote hosts.
 
 It is started with::
+
    trollcast_server my_config_file.cfg
 
 This will start a server that watches a given file, as specified in the
@@ -113,9 +119,9 @@ The client mode retrieves data.
 
 Here is the usage of the client::
 
- usage: client.py [-h] [-t TIMES TIMES] [-o OUTPUT] -f CONFIG_FILE
-                  satellite [satellite ...]
-
+ usage: trollcast_client [-h] [-t TIMES TIMES] [-o OUTPUT] -f CONFIG_FILE [-v]
+                         satellite [satellite ...]
+ 
  positional arguments:
    satellite             eg. noaa_18
 
@@ -142,11 +148,6 @@ There are two ways of running the client:
 
    In this case, only new data will be retrieved though, contrarily to the time
    interval retrieval where old data will be retrieved too if necessary.
-
-Contents:
-
-.. toctree::
-   :maxdepth: 2
 
 API
 ===
