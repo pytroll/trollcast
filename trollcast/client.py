@@ -30,6 +30,8 @@ gather the cadu packets in 1 packet per timecode
 """
 from __future__ import with_statement 
 
+from trollcast.multitimer import MultiTimer
+
 import logging
 from ConfigParser import ConfigParser
 from Queue import Queue, Empty
@@ -171,7 +173,7 @@ class HaveBuffer(Thread):
         self.scanlines = {}
         self._queues = []
         self._requesters = []
-        self._timers = {}
+        self._timers = MultiTimer()
 
     def add_queue(self, queue):
         """Adds a queue to dispatch have messages to
@@ -183,16 +185,15 @@ class HaveBuffer(Thread):
         """
         self._queues.remove(queue)
 
-    def send_to_queues(self, sat, utctime):
+    def send_to_queues(self, sat, uid):
         """Send scanline at *utctime* to queues.
         """
         try:
-            self._timers[(sat, utctime)].cancel()
-            del self._timers[(sat, utctime)]
+            self._timers.cancel(uid)
         except KeyError:
             pass
         for queue in self._queues:
-            queue.put_nowait((sat, utctime, self.scanlines[sat][utctime]))
+            queue.put_nowait((sat, uid, self.scanlines[sat][uid]))
         
 
     def run(self):
@@ -202,9 +203,9 @@ class HaveBuffer(Thread):
                 continue
             if(message.type == "have"):
                 sat = message.data["satellite"]
-                utctime = message.data["timecode"]
-                if isinstance(utctime, list):
-                    utctime = tuple(utctime)
+                uid = message.data["uid"]
+                if isinstance(uid, list):
+                    uid = tuple(uid)
                     
                 # This should take care of address translation.
                 sender = (message.sender.split("@")[1] + ":" +
@@ -212,27 +213,30 @@ class HaveBuffer(Thread):
                 elevation = message.data["elevation"]
                 
                 self.scanlines.setdefault(sat, {})
-                if utctime not in self.scanlines[sat]:
-                    self.scanlines[sat][utctime] = [(sender, elevation)]
+                if uid not in self.scanlines[sat]:
+                    self.scanlines[sat][uid] = [(sender, elevation)]
                     # TODO: This implies that we always wait BUFFER_TIME before
                     # sending to queue. In the case were the "have" messages of
                     # all servers were sent in less time, we should not be
                     # waiting...
-                    if len(self._requesters) <= 2:
-                        self.send_to_queues(sat, utctime)
+                    if len(self._requesters) == 1:
+                        self.send_to_queues(sat, uid)
                     else:
-                        timer = Timer(BUFFER_TIME,
-                                      self.send_to_queues,
-                                      args=[sat, utctime])
-                        timer.start()
-                        self._timers[(sat, utctime)] = timer
+                        #timer = Timer(BUFFER_TIME,
+                        #              self.send_to_queues,
+                        #              args=[sat, uid])
+                        #timer.start()
+                        #self._timers[(sat, uid)] = timer
+
+                        self._timers.add(uid, BUFFER_TIME, self.send_to_queues, args=[sat, uid])
+                        
                 else:
                     # Since append is atomic in CPython, this should work.
                     # However, if it is not, then this is not thread safe.
-                    self.scanlines[sat][utctime].append((sender, elevation))
-                    if (len(self.scanlines[sat][utctime]) ==
+                    self.scanlines[sat][uid].append((sender, elevation))
+                    if (len(self.scanlines[sat][uid]) ==
                         len(self._requesters)):
-                        self.send_to_queues(sat, utctime)
+                        self.send_to_queues(sat, uid)
                 
     def stop(self):
         """Stop buffering.
