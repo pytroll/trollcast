@@ -181,6 +181,7 @@ class CADUReader(object):
                 return self.read_line(raw_packet, True)
             else:
                 logger.info("spurious satellite number, skipping: " + str((arr["version"] >> 6) & 255))
+                logger.info("discarded %d / %d"%(vcount, vcid))
             return
 
         self.vcids.setdefault(vcid, []).append(vcount)
@@ -197,6 +198,7 @@ class CADUReader(object):
                     return self.read_line(raw_packet, True, 10)
                 else:
                     logger.info("Wrong offset: " + str(offset))
+                    logger.info("discarded %d / %d"%(vcount, vcid))
                     return
 
             packet_length = arr["packet_length"]
@@ -206,14 +208,25 @@ class CADUReader(object):
                                     count=1)[0]
                 new_timestamp = timecode(arr)
                 if new_timestamp is not None:
+                    if datetime.utcnow() < new_timestamp:
+                        logger.warning("timestamp in the future!" + str(new_timestamp))
+                        logger.info("discarded %d / %d"%(vcount, vcid))
+                        return
+                        
                     if abs(datetime.utcnow() - new_timestamp) > timedelta(days=360):
+                        logger.warning("timestamp more than a year old! " + str(new_timestamp))
+                        logger.info("discarded %d / %d"%(vcount, vcid))
                         return
                     self.satellite = satellite
                     self.last_received = datetime.utcnow()
                     self.timestamp[vcid] = new_timestamp
                     return (vcid, vcount, new_timestamp), satellite, packet
-                
-        return (vcid, vcount, self.timestamp[vcid]), satellite, packet
+        if vcid not in self.timestamp:
+            logger.warning("No timestamp for vcid " + str(vcid))
+            logger.info("discarded %d / %d"%(vcount, vcid))
+
+        else:
+            return (vcid, vcount, self.timestamp[vcid]), satellite, packet
 
 def dict_ccsds_pri(arr):
     apid =  (arr['ccsds_version']) & 0x7ff
@@ -282,7 +295,7 @@ def read_frame(data):
     spacecraft_id = ((arr1["version"][0] >> 6) & 255)
     vcid = arr1["version"][0] & 0x3f
     if version_number != 1 or spacecraft_id not in spacecrafts:
-        print "hopeless, giving up"
+        logger.warning("hopeless, giving up")
     try:
         spacecraft_name = spacecrafts[spacecraft_id]
     except KeyError:
@@ -316,7 +329,7 @@ def read_frame(data):
 
     arr1 = np.fromstring(str(new_data[offset:]), dtype=m_pdu_hdr_type, count=1)
     if arr1["hdr_ccsds_offset"][0] >> 11 != 0:
-        print "MPDU spare corrupted"
+        logger.warning("MPDU spare corrupted")
 
     fhp = arr1["hdr_ccsds_offset"][0] & 0x7ff
     if fhp == 2047:
@@ -429,7 +442,7 @@ def jam_lines(lines):
 if __name__ == '__main__':
     
     import sys
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("cadu")
     filename = sys.argv[1]
 
