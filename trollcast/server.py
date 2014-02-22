@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012, 2013 SMHI
+# Copyright (c) 2012, 2013, 2014 SMHI
 
 # Author(s):
 
@@ -361,9 +361,9 @@ class MirrorStreamer(Thread):
                                             message.data["elevation"],
                                             None,
                                             self._reqaddr)
-
-            if(message.type) == "heartbeat":
-                self.scanlines._socket.send(str(message))
+            # Don't forward the heartbeat!
+            #if(message.type) == "heartbeat":
+            #    self.scanlines._socket.send(str(message))
                 
     def stop(self):
         """Stop streaming.
@@ -447,7 +447,6 @@ class Responder(SocketLooperThread):
         if address not in self.mirrors:
             context = Context()
             socket = context.socket(REQ)
-            socket.setsockopt(LINGER, 1)
             socket.connect(address)
             self.mirrors[address] = socket
         else:
