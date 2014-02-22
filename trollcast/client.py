@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012, 2013 SMHI
+# Copyright (c) 2012, 2013, 2014 SMHI
 
 # Author(s):
 
@@ -28,7 +28,7 @@ import logging
 from ConfigParser import ConfigParser
 from Queue import Queue, Empty
 from datetime import timedelta, datetime
-from threading import Thread, Timer, Event
+from threading import Thread, Timer, Event, Lock
 
 import numpy as np
 from posttroll.message import Message, strp_isoformat
@@ -104,7 +104,7 @@ class RTimer(Thread):
 
 def reset_subscriber(subscriber, addr):
     logger.warning("Resetting connection to " + addr)
-    subscriber.reset(addr)
+    #subscriber.reset(addr)
 
 def create_timers(cfgfile, subscriber):
     cfg = ConfigParser()
@@ -147,6 +147,8 @@ class Requester(object):
 
     """Make a request connection, waiting to get scanlines .
     """
+
+    request_retries = 3
     
     def __init__(self, host, port, station, pubport=None):
         self._host = host
@@ -154,19 +156,34 @@ class Requester(object):
         self._station = station
         self._pubport = pubport
         self._context = Context()
-        self._socket = self._context.socket(REQ)
-        self._socket.setsockopt(LINGER, 1)
-        self._socket.connect("tcp://"+host+":"+str(port))
         self._poller = Poller()
+        self.connect()
+        self.blocked = False
+        self.lock = Lock()
+        
+    def reset_connection(self):
+        """Reset the socket
+        """
+        self.stop()
+        self.connect(self)
+
+    def connect(self):
+        """Connect the socket.
+        """
+        self._socket = self._context.socket(REQ)
+        self._socket.connect("tcp://"+self._host+":"+str(self._port))
         self._poller.register(self._socket, POLLIN)
 
     def stop(self):
         """Close the socket.
         """
+        self._socket.setsockopt(LINGER, 0)
         self._socket.close()
+        self._poller.unregister(self._socket)
 
     def __del__(self, *args, **kwargs):
         self.stop()
+        self._context.term()
 
     def send(self, msg):
         """Send a message.
@@ -177,10 +194,43 @@ class Requester(object):
         """Receive a message. *timeout* in ms.
         """
         if self._poller.poll(timeout):
+            self.blocked = False
             return Message(rawstr=self._socket.recv())
+        #elif not self.blocked:
+        #    self.reset_connection()
+        #    self.blocked = True
+        #    return None
         else:
             raise IOError("Timeout from " + str(self._host) +
                           ":" + str(self._port))
+        
+    def send_and_recv(self, msg, timeout=None):
+        """Sending *msg* and returning the reply. This function retries in case
+        of timeouts.
+        """
+        with self.lock:
+            retries_left = self.request_retries
+            self._socket.send(str(msg))
+
+            while retries_left:
+                socks = dict(self._poller.poll(timeout))
+                if socks.get(self._socket) == POLLIN:
+                    reply = self._socket.recv()
+                    return Message(rawstr=reply)
+                else:
+                    logger.warning("Timeout from tcp://"+self._host+":"
+                                   +str(self._port)+", retrying...")
+                    self.stop()
+                    retries_left -= 1
+                    if retries_left == 0:
+                        logger.error("Server doesn't answer, abandoning... "+
+                                     "tcp://"+self._host+":" +str(self._port))
+                        self.connect()
+                        return
+                    logger.info("Reconnecting and resending " + str(msg))
+                    self.connect()
+                    self._socket.send(str(msg))
+
     def ping(self):
         """Send a ping.
         """
@@ -189,11 +239,13 @@ class Requester(object):
                       'ping',
                       {"station": self._station})
         tic = datetime.now()
-        self.send(msg)
-        response = self.recv(REQ_TIMEOUT).data
+        response = self.send_and_recv(msg, REQ_TIMEOUT)
         toc = datetime.now()
-        return response["station"], toc - tic
-        
+        if response is None:
+            return None, toc - tic
+        else:
+            return response.data["station"], toc - tic
+
     def get_line(self, satellite, utctime):
         """Get the scanline of *satellite* at *utctime*.
         """
@@ -202,8 +254,12 @@ class Requester(object):
                       {"type": "scanline",
                        "satellite": satellite,
                        "utctime": utctime.isoformat()})
-        self.send(msg)
-        return self.recv(REQ_TIMEOUT).data
+        #self.send(msg)
+        try:
+            return self.send_and_recv(msg, REQ_TIMEOUT).data
+            #return self.recv(REQ_TIMEOUT).data
+        except AttributeError:
+            None
 
 
     def get_slice(self, satellite, start_time, end_time):
@@ -304,20 +360,27 @@ class HaveBuffer(Thread):
                         len(self._requesters)):
                         self.send_to_queues(sat, utctime)
             elif(message.type == "heartbeat"):
-                sender = ("tcp://" + message.sender.split("@")[1] +
+                senderhost = message.sender.split("@")[1]
+                sender = ("tcp://" + senderhost +
                           ":" + message.data["addr"].split(":")[1])
                 logger.debug("receive heartbeat from " + str(sender) +
                              ": " + str(message))
                 self._hb[str(sender)].reset()
+                
                 for addr, req in self._requesters.items():
-                    pubaddr = ":".join(addr.split(":")[:-1] +
-                                       [str(req._pubport)])
-                    if pubaddr == sender:
+                    # can we get the ip adress from the socket somehow ?
+                    # because right now the pubaddr and sender are not the same
+                    # (name vs ip)
+                    if addr == senderhost:
                         rstation, rtime = req.ping()
-                        
-                        logger.info("ping roundtrip to " + rstation +
-                                    ": " + str(rtime.microseconds /1000.0) +
-                                    "ms")
+                        if rstation is None:
+                            logger.warning("Can't ping " + str(sender))
+                        else:
+                            rtime = (rtime.seconds * 1000 +
+                                     rtime.microseconds / 1000.0)
+                            logger.debug("ping roundtrip to " + rstation +
+                                         ": " + str(rtime) +
+                                         "ms")
                         break
 
                 
@@ -407,7 +470,10 @@ class Client(HaveBuffer):
                     # failure, another source should be used. Choking ?
                     line = self._requesters[sender.split(":")[0]].get_line(sat,
                                                                        utctime)
-                    sat_lines[sat][utctime] = line
+                    if line is None:
+                        logger.warning("Could not retrieve line " + str(utctime))
+                    else:
+                        sat_lines[sat][utctime] = line
                 except Empty:
                     pass
                 for sat, utctime in sat_last_seen.items():
