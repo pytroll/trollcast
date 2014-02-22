@@ -1,4 +1,4 @@
-# Copyright (c) 2009, 2011, 2012.
+# Copyright (c) 2009, 2011, 2012, 2014.
 #
 
 # Author(s): 
@@ -78,7 +78,7 @@ def timecode(tc_array):
     msecs *= 1024
     word = tc_array[3]
     msecs += word & 1023
-    return datetime(2011, 1, 1) + timedelta(days=int(day/2 - 1),
+    return datetime(2014, 1, 1) + timedelta(days=int(day/2 - 1),
                                             milliseconds=int(msecs))
 
 
@@ -123,7 +123,7 @@ def read_u2_bytes(fdes):
 ## Reading
 ## http://www.ncdc.noaa.gov/oa/pod-guide/ncdc/docs/klm/html/c4/sec4-1.htm#t413-1
 
-def read_file(filename):
+def read_file(filename, swap=None):
     dtype = np.dtype([('frame_sync', '<u2', (6, )),
                       ('id', [('id', '<u2'),
                               ('spare', '<u2')]),
@@ -141,8 +141,10 @@ def read_file(filename):
                       ('aux_sync', '<u2', (100, ))])
 
     arr = np.fromfile(filename, dtype=dtype)
-    if not np.allclose(np.array((644, 367, 860, 413, 527, 149)),
-                       arr["frame_sync"]):
+    if swap is None and not np.allclose(np.array((644, 367, 860, 413, 527, 149)),
+                                        arr["frame_sync"]):
+        arr = arr.newbyteorder()
+    elif swap:
         arr = arr.newbyteorder()
     return arr
 
