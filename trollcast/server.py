@@ -494,15 +494,16 @@ class Responder(SocketLooperThread):
                         resp = Message('/oper/polar/direct_readout/'
                                        + self._station,
                                        "missing")
-                    if url.scheme in ["", "file"]: # data is locally stored.
-                        resp = Message('/oper/polar/direct_readout/'
-                                       + self._station,
-                                       "scanline",
-                                       self._holder.get_scanline(sat, utctime),
-                                       binary=True)
-                    else: # it's the address of a remote server.
-                        resp = self.forward_request(urlunparse(url),
-                                                    message)
+                    else:
+                        if url.scheme in ["", "file"]: # data is locally stored.
+                            resp = Message('/oper/polar/direct_readout/'
+                                           + self._station,
+                                           "scanline",
+                                           self._holder.get_scanline(sat, utctime),
+                                           binary=True)
+                        else: # it's the address of a remote server.
+                            resp = self.forward_request(urlunparse(url),
+                                                        message)
                     self._socket.send(str(resp))
 
                 # take in a new scanline
