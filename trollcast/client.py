@@ -256,7 +256,11 @@ class Requester(object):
                        "utctime": utctime.isoformat()})
         #self.send(msg)
         try:
-            return self.send_and_recv(msg, REQ_TIMEOUT).data
+            resp = self.send_and_recv(msg, REQ_TIMEOUT)
+            if resp.type == "missing":
+                return None
+            else:
+                return resp.data
             #return self.recv(REQ_TIMEOUT).data
         except AttributeError:
             None
