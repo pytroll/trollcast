@@ -479,16 +479,20 @@ class Client(HaveBuffer):
                 for sat, utctime in sat_last_seen.items():
                     if utctime + CLIENT_TIMEOUT < datetime.utcnow():
                         # write the lines to file
-                        logger.info(sat +
-                                    " seems to be inactive now, writing file.")
-                        first_time = min(sat_lines[sat].keys())
-                        filename = first_time.isoformat() + sat + ".hmf"
-                        with open(filename, "wb") as fp_:
-                            for linetime in sorted(sat_lines[sat].keys()):
-                                fp_.write(sat_lines[sat][linetime])
-
-                        sat_lines[sat] = {}
-                        del sat_last_seen[sat]
+                        try:
+                            first_time = min(sat_lines[sat].keys())
+                            logger.info(sat +
+                                        " seems to be inactive now, writing file.")
+                            filename = first_time.isoformat() + sat + ".hmf"
+                            with open(filename, "wb") as fp_:
+                                for linetime in sorted(sat_lines[sat].keys()):
+                                    fp_.write(sat_lines[sat][linetime])
+                        except ValueError:
+                            logger.info("Got no lines for " + sat)
+                            continue
+                        finally:
+                            sat_lines[sat] = {}
+                            del sat_last_seen[sat]
         except KeyboardInterrupt:
             for sat, utctime in sat_last_seen.items():
                 logger.info(sat + ": writing file.")
