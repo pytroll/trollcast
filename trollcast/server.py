@@ -488,7 +488,12 @@ class Responder(SocketLooperThread):
                      message.data["type"] == "scanline"):
                     sat = message.data["satellite"]
                     utctime = strp_isoformat(message.data["utctime"])
-                    url = urlparse(self._holder[sat][utctime][1])
+                    try:
+                        url = urlparse(self._holder[sat][utctime][1])
+                    except KeyError:
+                        resp = Message('/oper/polar/direct_readout/'
+                                       + self._station,
+                                       "missing")
                     if url.scheme in ["", "file"]: # data is locally stored.
                         resp = Message('/oper/polar/direct_readout/'
                                        + self._station,
