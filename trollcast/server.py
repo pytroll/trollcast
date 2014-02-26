@@ -463,7 +463,7 @@ class Responder(SocketLooperThread):
             socks = dict(poller.poll(timeout=2))
             if self._socket in socks and socks[self._socket] == POLLIN:
                 message = Message(rawstr=self._socket.recv(NOBLOCK))
-                
+                logger.debug("Request: " + str(message))
                 # send list of scanlines
                 if(message.type == "request" and
                    message.data["type"] == "scanlines"):
@@ -522,6 +522,12 @@ class Responder(SocketLooperThread):
                                    "pong",
                                    {"station": self._station})
                     self._socket.send(str(resp))
+
+                if resp.binary:
+                    logger.debug("Response: " + " ".join(str(resp).split()[:6]))
+                else:
+                    logger.debug("Response: " + str(resp))
+                
     def stop(self):
         self._loop = False
 
