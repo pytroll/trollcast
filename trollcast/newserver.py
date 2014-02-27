@@ -27,6 +27,7 @@ TODO:
  - cleanup memory once in a while
  - compute right elevation
  - add lines when local client gets data (if missing)
+ - check that mirror server is alive
 """
 
 from ConfigParser import ConfigParser
@@ -308,6 +309,40 @@ class DummyWatcher(Watcher):
         """
         self._loop = False
         self._event.set()
+
+class Cleaner(Thread):
+    """Dummy watcher for test purposes
+    """
+    def __init__(self, holder, delay):
+        Thread.__init__(self)
+        self._holder = holder
+        self._interval = 5
+        self._delay = delay
+        self._loop = True
+        self._event = Event()
+
+    def clean(self):
+        """Clean the db
+        """
+        logger.debug("Cleaning")
+        for sat in self._holder.sats():
+            satlines = self._holder.get_sat(sat)
+            for key in sorted(satlines):
+                if key < datetime.utcnow() - timedelta(hours=self._delay):
+                    self._holder.delete(sat, key)
+            
+                
+
+    def run(self):
+        while self._loop:
+            self.clean()
+            self._event.wait(self._interval)
+    
+    def stop(self):
+        """Stop adding stuff
+        """
+        self._loop = False
+        self._event.set()
     
 class Holder(object):
     """The mighty data holder
@@ -317,11 +352,30 @@ class Holder(object):
         self._data = {}
         self._pub = pub
         self._origin = origin
+        self._lock = Lock()
 
+    def delete(self, sat, key):
+        """Delete item
+        """
+        logger.debug("Removing from memory: " + str((sat, key)))
+        with self._lock:
+            del self._data[sat][key]
+
+    def get_sat(self, sat):
+        """Get the data for a given satellite *sat*.
+        """
+        return self._data[sat]
+
+    def sats(self):
+        """return the satellites in store.
+        """
+        return self._data.keys()
+        
     def get(self, sat, key):
         """get the value of *sat* and *key*
         """
-        return self._data[sat][key]
+        with self._lock:
+            return self._data[sat][key]
 
     def get_data(self, sat, key):
         """get the data of *sat* and *key*
@@ -331,7 +385,8 @@ class Holder(object):
     def add(self, sat, key, elevation, data):
         """Add some data.
         """
-        self._data.setdefault(sat, {})[key] = elevation, data
+        with self._lock:
+            self._data.setdefault(sat, {})[key] = elevation, data
         logger.debug("Got stuff for " + str((sat, key, elevation)))
         self.have(sat, key, elevation)
 
@@ -489,6 +544,11 @@ def serve(configfile):
         # holder
         holder = Holder(pub, pubaddress)
 
+        # cleaner
+
+        cleaner = Cleaner(holder, 1)
+        cleaner.start()
+
         # watcher
         #watcher = DummyWatcher(holder, 2)
         watcher = FileWatcher(holder, "/tmp/trolltest/*.temp")
@@ -522,6 +582,7 @@ def serve(configfile):
             mirror_watcher.stop()
         
         watcher.stop()
+        cleaner.stop()
         heart.stop()
         pub.stop()
         context.term()
