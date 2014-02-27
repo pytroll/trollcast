@@ -105,6 +105,7 @@ class Holder(object):
         self._socket = self._context.socket(PUB)
         self._socket.bind("tcp://*:" + port)
         self._lock = Lock()
+        self._send_lock = Lock()
         self._cache = []
         
         
@@ -127,7 +128,8 @@ class Holder(object):
         to_send["origin"] = self._addr
         msg = Message('/oper/polar/direct_readout/' + self._station, "have",
                       to_send).encode()
-        self._socket.send(msg)
+        with self._send_lock:
+            self._socket.send(msg)
 
     def send_heartbeat(self, next_pass_time="unknown"):
         to_send = {}
@@ -136,7 +138,8 @@ class Holder(object):
         msg =  Message('/oper/polar/direct_readout/' + self._station,
                        "heartbeat", to_send).encode()
         logger.debug("sending heartbeat: " + str(msg))
-        self._socket.send(msg)
+        with self._send_lock:
+            self._socket.send(msg)
 
     def get_scanline(self, satellite, utctime):
         info = self._holder[satellite][utctime]
@@ -444,6 +447,7 @@ class Responder(SocketLooperThread):
     def forward_request(self, address, message):
         """Forward a request to another server.
         """
+        # FIXME: shouldn't we have an open socket at all times ?
         if address not in self.mirrors:
             context = Context()
             socket = context.socket(REQ)
@@ -460,7 +464,7 @@ class Responder(SocketLooperThread):
         poller.register(self._socket, POLLIN)
         
         while self._loop:
-            socks = dict(poller.poll(timeout=2))
+            socks = dict(poller.poll(timeout=2000))
             if self._socket in socks and socks[self._socket] == POLLIN:
                 message = Message(rawstr=self._socket.recv(NOBLOCK))
                 logger.debug("Request: " + str(message))
