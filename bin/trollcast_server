@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 Martin Raspaud
+# Copyright (c) 2012, 2014 Martin Raspaud
 
 # Author(s):
 
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     else:
         logging.getLogger('').setLevel(logging.INFO)
     logging.getLogger('').addHandler(ch1)
-    logger = logging.getLogger("trollcast_client")
+    logger = logging.getLogger("trollcast_server")
 
     serve(args.config_file)
         
