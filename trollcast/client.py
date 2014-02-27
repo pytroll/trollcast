@@ -38,6 +38,7 @@ from zmq import Context, REQ, LINGER, Poller, POLLIN
 logger = logging.getLogger(__name__)
 
 # TODO: what if a scanline never arrives ? do we wait for it forever ?
+# TODO: subscriber reset
 
 # FIXME: this should be configurable depending on the type of data.
 LINES_PER_SECOND = 6

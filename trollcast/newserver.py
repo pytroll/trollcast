@@ -21,10 +21,16 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """New version of the trollcast server
+
+TODO:
+ - mirror
+ - cleanup memory once in a while
+ - compute right elevation
+ - add lines when local client gets data (if missing)
 """
 
 from ConfigParser import ConfigParser
-from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK
+from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK, SUB, SUBSCRIBE
 from threading import Thread, Event, Lock
 from posttroll.message import Message
 import logging
@@ -42,11 +48,15 @@ import random
 logger = logging.getLogger(__name__)
 
 class CADU(object):
+    """The cadu reader class
+    """
     @staticmethod
     def is_it(data):
         return False
 
 class HRPT(object):
+    """The hrpt reader class
+    """
     dtype = np.dtype([('frame_sync', '>u2', (6, )),
                       ('id', [('id', '>u2'),
                               ('spare', '>u2')]),
@@ -203,6 +213,79 @@ class FileWatcher(FileSystemEventHandler):
         
         for sat, key, elevation, data in self._reader(event.src_path):
             self._holder.add(sat, key, elevation, data)
+
+class _MirrorGetter(object):
+    """Gets data from the mirror when needed.
+    """
+
+    def __init__(self, socket, sat, key, lock):
+        self._socket = socket
+        self._sat = sat
+        self._key = key
+        self._lock = lock
+
+    def get_data(self):
+        """Get the actual data from the server we're mirroring
+        """
+        req = Message(subject,
+                      'request',
+                      {"type": "scanline",
+                       "satellite": self._sat,
+                       "utctime": self._key})
+        with self._lock:
+            self._socket.send(str(req))
+            rep = Message.decode(self._socket.recv())
+        # FIXME: check that there actually is data there.
+        return rep.data
+    
+    def __str__(self):
+        return self.get_data()
+
+    def __add__(self, other):
+        return str(self) + other
+
+    def __radd__(self, other):
+        return other + str(self)
+
+class MirrorWatcher(Thread):
+    """Watches a other server.
+    """
+
+    def __init__(self, holder, context, host, pubport, reqport):
+        Thread.__init__(self)
+        self._holder = holder
+        self._pubaddress = "tcp://" + host + ":" + str(pubport)
+        self._reqaddress = "tcp://" + host + ":" + str(reqport)
+
+        self._reqsocket = context.socket(REQ)
+        self._reqsocket.connect(self._reqaddress)
+
+        self._subsocket = context.socket(SUB)
+        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
+        self._subsocket.connect(self._pubaddress)
+        self._lock = Lock()
+        self._loop = True
+        
+    def run(self):
+        while self._loop:
+            message = Message.decode(self._subsocket.recv())
+            if message.type == "have":
+                sat = message.data["satellite"]
+                key = strp_isoformat(message.data["timecode"])
+                elevation = message.data["elevation"]
+                data = _MirrorGetter(self._reqsocket,
+                                     sat, key,
+                                     self._lock)
+                self._holder.add(sat, key, elevation, data)
+
+    def stop(self):
+        """Stop the watcher
+        """
+        self._loop = False
+        self._reqsocket.setsockopt(LINGER, 0)
+        self._reqsocket.close()
+        self._subsocket.setsockopt(LINGER, 0)
+        self._subsocket.close()
         
 class DummyWatcher(Watcher):
     """Dummy watcher for test purposes
@@ -411,6 +494,18 @@ def serve(configfile):
         watcher = FileWatcher(holder, "/tmp/trolltest/*.temp")
         watcher.start()
 
+        mirror_watcher = None
+        try:
+            mirror = cfg.get("local_reception", "mirror")
+        except NoOptionError:
+            pass
+        else:
+            pubport_m = cfg.getint(mirror, "pubport")
+            reqport_m = cfg.getint(mirror, "reqport")
+            mirror_watcher = MirrorWatcher(holder, context,
+                                           mirror, pubport_m, reqport_m)
+            mirror_watcher.start()
+
         # request manager
         reqport = cfg.getint(host, "reqport")
         reqman = RequestManager(context, holder, reqport, station)
@@ -422,6 +517,10 @@ def serve(configfile):
 
     finally:
         reqman.stop()
+
+        if mirror_watcher is not None:
+            mirror_watcher.stop()
+        
         watcher.stop()
         heart.stop()
         pub.stop()
