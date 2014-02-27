@@ -30,7 +30,7 @@ TODO:
  - check that mirror server is alive
 """
 
-from ConfigParser import ConfigParser
+from ConfigParser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK, SUB, SUBSCRIBE
 from threading import Thread, Event, Lock
 from posttroll.message import Message
@@ -322,7 +322,7 @@ class Cleaner(Thread):
     def __init__(self, holder, delay):
         Thread.__init__(self)
         self._holder = holder
-        self._interval = 5
+        self._interval = 60
         self._delay = delay
         self._loop = True
         self._event = Event()
