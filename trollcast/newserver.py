@@ -551,7 +551,10 @@ def serve(configfile):
 
         # watcher
         #watcher = DummyWatcher(holder, 2)
-        watcher = FileWatcher(holder, "/tmp/trolltest/*.temp")
+        path = cfg.get("local_reception", "data_dir")
+        pattern = cfg.get("local_reception", "file_pattern")
+        
+        watcher = FileWatcher(holder, os.path.join(path, pattern))
         watcher.start()
 
         mirror_watcher = None
@@ -574,6 +577,9 @@ def serve(configfile):
 
         while True:
             time.sleep(10000)
+
+    except:
+        logger.exception("There was an error!")
 
     finally:
         reqman.stop()
