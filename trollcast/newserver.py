@@ -100,6 +100,8 @@ class HRPT(object):
 
     @staticmethod
     def timecode(tc_array):
+        """HRPT timecode reading
+        """
         word = tc_array[0]
         day = word
         word = tc_array[1]
@@ -160,13 +162,6 @@ class HRPT(object):
 FORMATS = [CADU, HRPT]
 
 
-class Watcher(Thread):
-
-    """Watch incoming data.
-    """
-
-    pass
-
 class FileWatcher(FileSystemEventHandler):
     """Watch files
     """
@@ -201,9 +196,13 @@ class FileWatcher(FileSystemEventHandler):
                         return elts
                 
     def start(self):
+        """Start the file watcher
+        """
         self._notifier.start()
 
     def stop(self):
+        """Stop the file watcher
+        """
         self._notifier.stop()
 
     def on_modified(self, event):
@@ -224,10 +223,14 @@ class _MirrorGetter(object):
         self._sat = sat
         self._key = key
         self._lock = lock
+        self._data = None
 
     def get_data(self):
         """Get the actual data from the server we're mirroring
         """
+        if self._data is not None:
+            return self._data
+        
         req = Message(subject,
                       'request',
                       {"type": "scanline",
@@ -237,7 +240,8 @@ class _MirrorGetter(object):
             self._socket.send(str(req))
             rep = Message.decode(self._socket.recv())
         # FIXME: check that there actually is data there.
-        return rep.data
+        self._data = rep.data
+        return self._data
     
     def __str__(self):
         return self.get_data()
@@ -278,7 +282,9 @@ class MirrorWatcher(Thread):
                                      sat, key,
                                      self._lock)
                 self._holder.add(sat, key, elevation, data)
-
+            if message.type == "heartbeat":
+                logger.debug("Got heartbeat from " + str(self._pubaddress)
+                             + ": " + str(message))
     def stop(self):
         """Stop the watcher
         """
@@ -288,7 +294,7 @@ class MirrorWatcher(Thread):
         self._subsocket.setsockopt(LINGER, 0)
         self._subsocket.close()
         
-class DummyWatcher(Watcher):
+class DummyWatcher(Thread):
     """Dummy watcher for test purposes
     """
     def __init__(self, holder, uri):
