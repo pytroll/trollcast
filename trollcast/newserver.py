@@ -483,7 +483,7 @@ class RequestManager(Thread):
         self._socket.send(str(message))
 
     def pong(self):
-        self.send(Message(subject, "pong", {"station": self._station}))
+        return Message(subject, "pong", {"station": self._station})
 
     def scanline(self, message):
         sat = message.data["satellite"]
@@ -494,13 +494,13 @@ class RequestManager(Thread):
             resp = Message(subject, "missing")
         else:
             resp = Message(subject, "scanline", data, binary=True)
-        self.send(resp)
+        return resp
             
     def notice(self, message):
-        self.send(Message(subject, "ack"))
+        return Message(subject, "ack")
 
     def unknown(self, message):
-        self.send(Message(subject, "unknown"))
+        return Message(subject, "unknown")
         
     def run(self):
         while self._loop:
@@ -510,15 +510,20 @@ class RequestManager(Thread):
                 with self._lock:
                     message = Message(rawstr=self._socket.recv(NOBLOCK))
                     logger.debug("processing request: " + str(message))
-                    if message.type == "ping":
-                        self.pong()
-                    elif (message.type == "request" and
-                        message.data["type"] == "scanline"):
-                        self.scanline(message)
-                    elif message.type == "notice" and message.data["type"] == "scanline":
-                        self.notice(message)
-                    else: # unknown request
-                        self.unknown(message)
+                    reply = Message(subject, "error")
+                    try:
+                        if message.type == "ping":
+                            reply = self.pong()
+                        elif (message.type == "request" and
+                            message.data["type"] == "scanline"):
+                            reply = self.scanline(message)
+                        elif (message.type == "notice" and
+                              message.data["type"] == "scanline"):
+                            reply = self.notice(message)
+                        else: # unknown request
+                            reply = self.unknown(message)
+                    finally:
+                        self.send(reply)
             else: # timeout
                 pass
 
