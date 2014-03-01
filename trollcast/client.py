@@ -46,7 +46,7 @@ LINE_SIZE = 11090 * 2
 CLIENT_TIMEOUT = timedelta(seconds=5)
 REQ_TIMEOUT = 1000
 BUFFER_TIME = 2.0
-
+context = Context()
 def create_subscriber(cfgfile):
     """Create a new subscriber for all the remote hosts in cfgfile.
     """
@@ -150,13 +150,12 @@ class Requester(object):
     """
 
     request_retries = 3
-    
+
     def __init__(self, host, port, station, pubport=None):
         self._host = host
         self._port = port
         self._station = station
         self._pubport = pubport
-        self._context = Context()
         self._poller = Poller()
         self.connect()
         self.blocked = False
@@ -171,20 +170,19 @@ class Requester(object):
     def connect(self):
         """Connect the socket.
         """
-        self._socket = self._context.socket(REQ)
+        self._socket = context.socket(REQ)
         self._socket.connect("tcp://"+self._host+":"+str(self._port))
         self._poller.register(self._socket, POLLIN)
 
     def stop(self):
         """Close the socket.
         """
+        self._poller.unregister(self._socket)
         self._socket.setsockopt(LINGER, 0)
         self._socket.close()
-        self._poller.unregister(self._socket)
 
     def __del__(self, *args, **kwargs):
         self.stop()
-        self._context.term()
 
     def send(self, msg):
         """Send a message.
@@ -291,9 +289,9 @@ class Requester(object):
                        "elevation": elevation,
                        "filename": filename,
                        "file_position": pos})
-        self.send(msg)
-        self._socket.recv()         
-
+        response = self.send_and_recv(msg, REQ_TIMEOUT)
+        return response
+    
 class HaveBuffer(Thread):
     """Listen to incomming have messages.
     """
