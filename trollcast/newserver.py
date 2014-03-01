@@ -497,8 +497,11 @@ class RequestManager(Thread):
             resp = Message(subject, "scanline", data, binary=True)
         self.send(resp)
             
-    def notice(message):
+    def notice(self, message):
         self.send(Message(subject, "ack"))
+
+    def unknown(self, message):
+        self.send(Message(subject, "unknown"))
         
     def run(self):
         while self._loop:
@@ -508,11 +511,13 @@ class RequestManager(Thread):
                 logger.debug("processing request: " + str(message))
                 if message.type == "ping":
                     self.pong()
-                if (message.type == "request" and
+                elif (message.type == "request" and
                     message.data["type"] == "scanline"):
                     self.scanline(message)
-                if message.type == "notice" and message.data["type"] == scanline:
+                elif message.type == "notice" and message.data["type"] == scanline:
                     self.notice(message)
+                else: # unknown request
+                    self.unknown(message)
             else: # timeout
                 pass
 
