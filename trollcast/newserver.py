@@ -476,12 +476,11 @@ class RequestManager(Thread):
         self._poller.register(self._socket, POLLIN)
         
     def send(self, message):
-        with self._lock:
-            if message.binary:
-                logger.debug("Response: " + " ".join(str(message).split()[:6]))
-            else:
-                logger.debug("Response: " + str(message))
-            self._socket.send(str(message))
+        if message.binary:
+            logger.debug("Response: " + " ".join(str(message).split()[:6]))
+        else:
+            logger.debug("Response: " + str(message))
+        self._socket.send(str(message))
 
     def pong(self):
         self.send(Message(subject, "pong", {"station": self._station}))
@@ -507,17 +506,19 @@ class RequestManager(Thread):
         while self._loop:
             socks = dict(self._poller.poll(timeout=2000)) 
             if self._socket in socks and socks[self._socket] == POLLIN:
-                message = Message(rawstr=self._socket.recv(NOBLOCK))
-                logger.debug("processing request: " + str(message))
-                if message.type == "ping":
-                    self.pong()
-                elif (message.type == "request" and
-                    message.data["type"] == "scanline"):
-                    self.scanline(message)
-                elif message.type == "notice" and message.data["type"] == "scanline":
-                    self.notice(message)
-                else: # unknown request
-                    self.unknown(message)
+                logger.debug("Received a request, waiting for the lock")
+                with self._lock:
+                    message = Message(rawstr=self._socket.recv(NOBLOCK))
+                    logger.debug("processing request: " + str(message))
+                    if message.type == "ping":
+                        self.pong()
+                    elif (message.type == "request" and
+                        message.data["type"] == "scanline"):
+                        self.scanline(message)
+                    elif message.type == "notice" and message.data["type"] == "scanline":
+                        self.notice(message)
+                    else: # unknown request
+                        self.unknown(message)
             else: # timeout
                 pass
 
