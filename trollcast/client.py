@@ -216,7 +216,11 @@ class Requester(object):
                 socks = dict(self._poller.poll(timeout))
                 if socks.get(self._socket) == POLLIN:
                     reply = self._socket.recv()
-                    logger.debug("Got reply: " + str(reply))
+                    rep = Message(rawstr=reply)
+                    if rep.binary:
+                        logger.debug("Got reply: " + " ".join(str(rep).split()[:6]))
+                    else:
+                        logger.debug("Got reply: " + str(rep))
                     return Message(rawstr=reply)
                 else:
                     logger.warning("Timeout from tcp://"+self._host+":"
