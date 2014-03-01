@@ -514,7 +514,7 @@ class RequestManager(Thread):
                 elif (message.type == "request" and
                     message.data["type"] == "scanline"):
                     self.scanline(message)
-                elif message.type == "notice" and message.data["type"] == scanline:
+                elif message.type == "notice" and message.data["type"] == "scanline":
                     self.notice(message)
                 else: # unknown request
                     self.unknown(message)
