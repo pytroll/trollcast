@@ -207,6 +207,7 @@ class Requester(object):
         """Sending *msg* and returning the reply. This function retries in case
         of timeouts.
         """
+        logger.debug("Requesting: " + str(msg))
         with self.lock:
             retries_left = self.request_retries
             self._socket.send(str(msg))
@@ -215,6 +216,7 @@ class Requester(object):
                 socks = dict(self._poller.poll(timeout))
                 if socks.get(self._socket) == POLLIN:
                     reply = self._socket.recv()
+                    logger.debug("Got reply: " + str(reply))
                     return Message(rawstr=reply)
                 else:
                     logger.warning("Timeout from tcp://"+self._host+":"
