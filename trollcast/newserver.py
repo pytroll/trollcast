@@ -24,10 +24,10 @@
 
 TODO:
  - mirror
- - cleanup memory once in a while
  - compute right elevation
  - add lines when local client gets data (if missing)
  - check that mirror server is alive
+ - shut down nicely
 """
 
 from ConfigParser import ConfigParser, NoOptionError
@@ -285,6 +285,7 @@ class MirrorWatcher(Thread):
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
+
     def stop(self):
         """Stop the watcher
         """
@@ -496,6 +497,8 @@ class RequestManager(Thread):
             resp = Message(subject, "scanline", data, binary=True)
         self.send(resp)
             
+    def notice(message):
+        self.send(Message(subject, "ack"))
         
     def run(self):
         while self._loop:
@@ -508,7 +511,8 @@ class RequestManager(Thread):
                 if (message.type == "request" and
                     message.data["type"] == "scanline"):
                     self.scanline(message)
-                    
+                if message.type == "notice" and message.data["type"] == scanline:
+                    self.notice(message)
             else: # timeout
                 pass
 
