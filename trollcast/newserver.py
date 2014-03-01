@@ -510,6 +510,7 @@ class RequestManager(Thread):
                 with self._lock:
                     message = Message(rawstr=self._socket.recv(NOBLOCK))
                     logger.debug("processing request: " + str(message))
+                    logger.debug(str((message.type, message.data["type"])))
                     reply = Message(subject, "error")
                     try:
                         if message.type == "ping":
