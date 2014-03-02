@@ -575,10 +575,14 @@ def serve(configfile):
         # watcher
         #watcher = DummyWatcher(holder, 2)
         path = cfg.get("local_reception", "data_dir")
-        pattern = cfg.get("local_reception", "file_pattern")
+        watcher = None
+        if not os.path.exists(path):
+            logger.warning(path + " doesn't exist, not getting data from files")
+        else:
+            pattern = cfg.get("local_reception", "file_pattern")
         
-        watcher = FileWatcher(holder, os.path.join(path, pattern))
-        watcher.start()
+            watcher = FileWatcher(holder, os.path.join(path, pattern))
+            watcher.start()
 
         mirror_watcher = None
         try:
@@ -610,7 +614,8 @@ def serve(configfile):
         if mirror_watcher is not None:
             mirror_watcher.stop()
         
-        watcher.stop()
+        if watcher is not None:
+            watcher.stop()
         cleaner.stop()
         heart.stop()
         pub.stop()
