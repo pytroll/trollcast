@@ -230,7 +230,8 @@ class _MirrorGetter(object):
         """
         if self._data is not None:
             return self._data
-        
+
+        logger.debug("Grabbing scanline from mirror")
         req = Message(subject,
                       'request',
                       {"type": "scanline",
@@ -241,6 +242,7 @@ class _MirrorGetter(object):
             rep = Message.decode(self._socket.recv())
         # FIXME: check that there actually is data there.
         self._data = rep.data
+        logger.debug("Retrieved scanline from mirror successfully")
         return self._data
     
     def __str__(self):
@@ -510,7 +512,6 @@ class RequestManager(Thread):
                 with self._lock:
                     message = Message(rawstr=self._socket.recv(NOBLOCK))
                     logger.debug("processing request: " + str(message))
-                    logger.debug(str((message.type, message.data["type"])))
                     reply = Message(subject, "error")
                     try:
                         if message.type == "ping":
