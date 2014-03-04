@@ -21,6 +21,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """Trollcast client. Leeches all it can :)
+todo:
+- connection between institutes is shutdown after a while (2 hours ?)
+- filename are wrong (1 year to old)
+- Option for new log file every day? Now log files are quite big after few days.
+- resets connection to mirror in case of timeout.
+
 """
 from __future__ import with_statement 
 
@@ -32,8 +38,7 @@ from threading import Thread, Timer, Event, Lock
 
 import numpy as np
 from posttroll.message import Message, strp_isoformat
-from posttroll.subscriber import Subscriber
-from zmq import Context, REQ, LINGER, Poller, POLLIN
+from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,76 @@ CLIENT_TIMEOUT = timedelta(seconds=5)
 REQ_TIMEOUT = 1000
 BUFFER_TIME = 2.0
 context = Context()
+
+class Subscriber(object):
+
+    def __init__(self, addresses, translate=False):
+        self._addresses = addresses
+        self._translate = translate
+        self.subscribers = []
+        for addr in self._addresses:
+            subscriber = context.socket(SUB)
+            subscriber.setsockopt(SUBSCRIBE, "pytroll")
+            subscriber.connect(addr)
+            self.subscribers.append(subscriber)
+
+        self._poller = Poller()
+        self._lock = Lock()
+        self._loop = True
+    @property
+    def sub_addr(self):
+        return dict(zip(self.subscribers, self._addresses))
+
+    @property
+    def addr_sub(self):
+        return dict(zip(self._addresses, self.subscribers))
+
+    def reset(self, addr):
+        with self._lock:
+            idx = self._addresses.index(addr)
+            self._poller.unregister(self.subscribers[idx])
+            self.subscribers[idx].setsockopt(LINGER, 0)
+            self.subscribers[idx].close()
+            self.subscribers[idx] = context.socket(SUB)
+            self.subscribers[idx].setsockopt(SUBSCRIBE, "pytroll")
+            self.subscribers[idx].connect(addr)
+            self._poller.register(self.subscribers[idx], POLLIN)
+
+    def recv(self, timeout=None):
+        """Receive a message, timeout in seconds.
+        """
+        
+        if timeout:
+            timeout *= 1000
+
+        while(self._loop):
+            with self._lock:
+                if not self._loop:
+                    break
+                subs = dict(self._poller.poll(timeout=timeout))
+                if subs:
+                    for sub in self.subscribers:
+                        if sub in subs and subs[sub] == POLLIN:
+                            msg = Message.decode(sub.recv())
+                            if self._translate:
+                                url = urlsplit(self.sub_addr[sub])
+                                host = url[1].split(":")[0]
+                                msg.sender = (msg.sender.split("@")[0]
+                                              + "@" + host)
+                            yield msg
+                else:
+                    yield None
+                
+    def stop(self):
+        """Stop the subscriber
+        """
+        with self._lock:
+            self._loop = False
+            for sub in self.subscribers:
+                self._poller.unregister(sub)
+                sub.setsockopt(LINGER, 0)
+                sub.close()
+                
 def create_subscriber(cfgfile):
     """Create a new subscriber for all the remote hosts in cfgfile.
     """
@@ -62,7 +137,7 @@ def create_subscriber(cfgfile):
                  cfg.get(localhost, "hostname") + ":" +
                  cfg.get(localhost, "pubport"))
     logger.debug("Subscribing to " + str(addrs))
-    return Subscriber(addrs, "hrpt 0", translate=True)
+    return Subscriber(addrs, translate=True)
 
 class RTimer(Thread):
     def __init__(self, tries, warning_message, function, *args, **kwargs):
@@ -105,7 +180,7 @@ class RTimer(Thread):
 
 def reset_subscriber(subscriber, addr):
     logger.warning("Resetting connection to " + addr)
-    #subscriber.reset(addr)
+    subscriber.reset(addr)
 
 def create_timers(cfgfile, subscriber):
     cfg = ConfigParser()
@@ -195,10 +270,6 @@ class Requester(object):
         if self._poller.poll(timeout):
             self.blocked = False
             return Message(rawstr=self._socket.recv())
-        #elif not self.blocked:
-        #    self.reset_connection()
-        #    self.blocked = True
-        #    return None
         else:
             raise IOError("Timeout from " + str(self._host) +
                           ":" + str(self._port))
@@ -259,14 +330,13 @@ class Requester(object):
                       {"type": "scanline",
                        "satellite": satellite,
                        "utctime": utctime.isoformat()})
-        #self.send(msg)
+
         try:
             resp = self.send_and_recv(msg, REQ_TIMEOUT)
             if resp.type == "missing":
                 return None
             else:
                 return resp.data
-            #return self.recv(REQ_TIMEOUT).data
         except AttributeError:
             None
 
