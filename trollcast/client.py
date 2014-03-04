@@ -35,7 +35,7 @@ from ConfigParser import ConfigParser
 from Queue import Queue, Empty
 from datetime import timedelta, datetime
 from threading import Thread, Timer, Event, Lock
-
+from urlparse import urlsplit
 import numpy as np
 from posttroll.message import Message, strp_isoformat
 from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE
@@ -218,6 +218,70 @@ def create_requesters(cfgfile):
     url = "tcp://" + host + ":" + port
     requesters[host] = Requester(host, port, station, pubport)
     return requesters
+
+class SimpleRequester(object):
+
+    """Base requester class.
+    """
+    
+    def __init__(self, host, port, reqcontext):
+        self._context = reqcontext
+        self._socket = None
+        self._reqaddress = "tcp://" + host + ":" + str(port)
+        self._poller = Poller()
+        self._lock = Lock()
+        self.request_retries = 3
+
+        self.connect()
+        
+    def connect(self):
+        """Connect to the server
+        """
+        self._socket = self._context.socket(REQ)
+        self._socket.connect(self._reqaddress)
+        self._poller.register(self._socket, POLLIN)
+
+    def stop(self):
+        """Close the connection to the server
+        """
+        self._poller.unregister(self._socket)
+        self._socket.setsockopt(LINGER, 0)
+        self._socket.close()
+
+
+    def send_and_recv(self, msg, timeout=None):
+        """Sending *msg* and returning the reply. This function retries in case
+        of timeouts.
+        """
+        logger.debug("Requesting: " + str(msg))
+        with self._lock:
+            retries_left = self.request_retries
+            self._socket.send(str(msg))
+
+            while retries_left:
+                socks = dict(self._poller.poll(timeout))
+                if socks.get(self._socket) == POLLIN:
+                    reply = self._socket.recv()
+                    rep = Message(rawstr=reply)
+                    if rep.binary:
+                        logger.debug("Got reply: "
+                                     + " ".join(str(rep).split()[:6]))
+                    else:
+                        logger.debug("Got reply: " + str(rep))
+                    return Message(rawstr=reply)
+                else:
+                    logger.warning("Timeout from " + str(self._reqaddress)
+                                   + ", retrying...")
+                    self.stop()
+                    retries_left -= 1
+                    if retries_left == 0:
+                        logger.error("Server doesn't answer, abandoning... "+
+                                     str(self._reqaddress))
+                        self.connect()
+                        return
+                    logger.info("Reconnecting and resending " + str(msg))
+                    self.connect()
+                    self._socket.send(str(msg))
 
 class Requester(object):
 
