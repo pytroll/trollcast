@@ -143,7 +143,7 @@ class RTimer(Thread):
     def __init__(self, tries, warning_message, function, *args, **kwargs):
         Thread.__init__(self)
         self.event = Event()
-        self.interval = 400
+        self.interval = 40
         self.loop = True
         self.tries = tries
         self.attempt = 0
