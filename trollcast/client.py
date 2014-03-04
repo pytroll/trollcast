@@ -59,13 +59,13 @@ class Subscriber(object):
         self._addresses = addresses
         self._translate = translate
         self.subscribers = []
+        self._poller = Poller()
         for addr in self._addresses:
             subscriber = context.socket(SUB)
             subscriber.setsockopt(SUBSCRIBE, "pytroll")
             subscriber.connect(addr)
             self.subscribers.append(subscriber)
-
-        self._poller = Poller()
+            self._poller.register(subscriber)
         self._lock = Lock()
         self._loop = True
     @property
