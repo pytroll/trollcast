@@ -321,6 +321,85 @@ class MirrorWatcher(Thread):
         self._reqsocket.close()
         self._subsocket.setsockopt(LINGER, 0)
         self._subsocket.close()
+
+from trollcast.client import SimpleRequester
+
+class _MirrorGetter2(object):
+    """Gets data from the mirror when needed.
+    """
+
+    def __init__(self, req, sat, key):
+        self._req = req
+        self._sat = sat
+        self._key = key
+        self._data = None
+
+    def get_data(self):
+        """Get the actual data from the server we're mirroring
+        """
+        if self._data is not None:
+            return self._data
+
+        logger.debug("Grabbing scanline from mirror")
+        reqmsg = Message(subject,
+                         'request',
+                         {"type": "scanline",
+                          "satellite": self._sat,
+                          "utctime": self._key})
+        rep = Message.decode(self._req.send_and_recv(str(reqmsg), 0.3))
+        # FIXME: check that there actually is data there.
+        self._data = rep.data
+        logger.debug("Retrieved scanline from mirror successfully")
+        return self._data
+    
+    def __str__(self):
+        return self.get_data()
+
+    def __add__(self, other):
+        return str(self) + other
+
+    def __radd__(self, other):
+        return other + str(self)
+
+class MirrorWatcher2(Thread):
+    """Watches a other server.
+    """
+
+    def __init__(self, holder, context, host, pubport, reqport):
+        Thread.__init__(self)
+        self._holder = holder
+        self._pubaddress = "tcp://" + host + ":" + str(pubport)
+        self._reqaddress = "tcp://" + host + ":" + str(reqport)
+
+        self._req = SimpleRequester(host, reqport, context)
+
+        self._subsocket = context.socket(SUB)
+        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
+        self._subsocket.connect(self._pubaddress)
+        self._lock = Lock()
+        self._loop = True
+        
+    def run(self):
+        while self._loop:
+            message = Message.decode(self._subsocket.recv())
+            if message.type == "have":
+                sat = message.data["satellite"]
+                key = strp_isoformat(message.data["timecode"])
+                elevation = message.data["elevation"]
+                data = _MirrorGetter2(self._req, sat, key)
+                self._holder.add(sat, key, elevation, data)
+            if message.type == "heartbeat":
+                logger.debug("Got heartbeat from " + str(self._pubaddress)
+                             + ": " + str(message))
+
+    def stop(self):
+        """Stop the watcher
+        """
+        self._loop = False
+        self._req.stop()
+        self._subsocket.setsockopt(LINGER, 0)
+        self._subsocket.close()
+
         
 class DummyWatcher(Thread):
     """Dummy watcher for test purposes
@@ -633,8 +712,8 @@ def serve(configfile):
         else:
             pubport_m = cfg.getint(mirror, "pubport")
             reqport_m = cfg.getint(mirror, "reqport")
-            mirror_watcher = MirrorWatcher(holder, context,
-                                           mirror, pubport_m, reqport_m)
+            mirror_watcher = MirrorWatcher2(holder, context,
+                                            mirror, pubport_m, reqport_m)
             mirror_watcher.start()
 
         # request manager
