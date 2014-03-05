@@ -152,11 +152,14 @@ class HRPT(object):
             if utctime > now:
                 # Can't have data from the future... yet :)
                 utctime = datetime(year - 1, 1, 1) + days
-                
-            if not (np.all(line['aux_sync'] == self.hrpt_sync) and
-                    np.all(line['frame_sync'] == self.hrpt_sync_start)):
+
+            qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
+                    np.sum(line['frame_sync'] == self.hrpt_sync_start))
+            qual = (100*qual)/106
+            logger.info("Quality " + str(qual))
+
+            if qual != 100:
                 logger.info("Garbage line: " + str(utctime))
-                continue
             
             satellite = self.satellites[((line["id"]["id"] >> 3) & 15)]
 
@@ -174,7 +177,7 @@ class HRPT(object):
             # - serve also already present files
             # - timeout and close the file
 
-            elts.append((satellite, utctime, elevation,
+            elts.append((satellite, utctime, elevation, qual,
                          data[self.line_size * i: self.line_size * (i+1)]))
             i += 1
         return elts, self.line_size * i, f_elev
@@ -233,8 +236,8 @@ class FileWatcher(FileSystemEventHandler):
         if not fnmatch(fname, self._pattern):
             return
         
-        for sat, key, elevation, data in self._reader(event.src_path):
-            self._holder.add(sat, key, elevation, data)
+        for sat, key, elevation, qual, data in self._reader(event.src_path):
+            self._holder.add(sat, key, elevation, qual, data)
 
 class _MirrorGetter(object):
     """Gets data from the mirror when needed.
@@ -411,23 +414,24 @@ class Holder(object):
     def get_data(self, sat, key):
         """get the data of *sat* and *key*
         """
-        return self.get(sat, key)[1]
+        return self.get(sat, key)[2]
 
-    def add(self, sat, key, elevation, data):
+    def add(self, sat, key, elevation, qual, data):
         """Add some data.
         """
         with self._lock:
-            self._data.setdefault(sat, {})[key] = elevation, data
-        logger.debug("Got stuff for " + str((sat, key, elevation)))
-        self.have(sat, key, elevation)
+            self._data.setdefault(sat, {})[key] = elevation, qual, data
+        logger.debug("Got stuff for " + str((sat, key, elevation, qual)))
+        self.have(sat, key, elevation, qual)
 
-    def have(self, sat, key, elevation):
+    def have(self, sat, key, elevation, qual):
         """Tell the world about our new data.
         """
         to_send = {}
         to_send["satellite"] = sat
         to_send["timecode"] = key
         to_send["elevation"] = elevation
+        to_send["quality"] = qual
         to_send["origin"] = self._origin
         msg = Message(subject, "have", to_send).encode()
         self._pub.send(msg)
