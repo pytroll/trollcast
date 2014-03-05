@@ -479,10 +479,13 @@ class HaveBuffer(Thread):
                 sender = (message.sender.split("@")[1] + ":" +
                           message.data["origin"].split(":")[1])
                 elevation = message.data["elevation"]
-                
+                try:
+                    quality = message.data["quality"]
+                except KeyError:
+                    quality = 100
                 self.scanlines.setdefault(sat, {})
                 if utctime not in self.scanlines[sat]:
-                    self.scanlines[sat][utctime] = [(sender, elevation)]
+                    self.scanlines[sat][utctime] = [(sender, elevation, quality)]
                     # TODO: This implies that we always wait BUFFER_TIME before
                     # sending to queue. In the case were the "have" messages of
                     # all servers were sent in less time, we should not be
@@ -498,7 +501,8 @@ class HaveBuffer(Thread):
                 else:
                     # Since append is atomic in CPython, this should work.
                     # However, if it is not, then this is not thread safe.
-                    self.scanlines[sat][utctime].append((sender, elevation))
+                    self.scanlines[sat][utctime].append((sender, elevation,
+                                                         quality))
                     if (len(self.scanlines[sat][utctime]) ==
                         len(self._requesters)):
                         self.send_to_queues(sat, utctime)
@@ -604,8 +608,9 @@ class Client(HaveBuffer):
                     sat_last_seen[sat] = datetime.utcnow()
                     logger.debug("Picking line " + " ".join([str(utctime),
                                                          str(senders)]))
-                    # choose the highest elevation
-                    sender, elevation = max(senders, key=(lambda x: x[1]))
+                    # choose the highest elevation and quality
+                    sender, elevation, quality = max(senders,
+                                                     key=(lambda x: (x[2], x[1])))
                     logger.debug("requesting " +
                                  " ".join([str(sat), str(utctime),
                                            str(sender), str(elevation)]))
