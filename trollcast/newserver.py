@@ -34,6 +34,7 @@ from ConfigParser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK, SUB, SUBSCRIBE
 from threading import Thread, Event, Lock
 from posttroll.message import Message
+from pyorbital.orbital import Orbital
 import logging
 import time
 from datetime import datetime, timedelta
@@ -45,9 +46,29 @@ from urlparse import urlparse
 import os
 import numpy as np
 import random
+from glob import glob
 
 logger = logging.getLogger(__name__)
 
+def get_f_elev(satellite):
+    """Get the elevation function for a given satellite
+    """
+
+    if tle_files is not None:
+        filelist = glob(tle_files)
+        tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
+    else:
+        tle_file = None
+
+    orb = Orbital(satellite.upper(), tle_file)
+    def f_elev(utctime):
+        """Get the elevation for the given *utctime*.
+        """
+        return orb.get_observer_look(utctime, *coords)[1]
+        
+    return f_elev
+
+        
 class CADU(object):
     """The cadu reader class
     """
@@ -113,7 +134,7 @@ class HRPT(object):
         msecs += word & 1023
         return timedelta(days=int(day/2 - 1), milliseconds=int(msecs))
 
-    def read(self, data):
+    def read(self, data, f_elev=None):
         """Read hrpt data.
         """
         lines = np.fromstring(data, dtype=self.dtype,
@@ -139,9 +160,10 @@ class HRPT(object):
             
             satellite = self.satellites[((line["id"]["id"] >> 3) & 15)]
 
-            #elevation = self._orbital.get_observer_look(utctime,
-            #                                            *self._coords)[1]
-            elevation = random.uniform(0, 90)
+            if f_elev is None:
+                f_elev = get_f_elev(satellite)
+
+            elevation = f_elev(utctime)
             logger.debug("Got line " + utctime.isoformat() + " "
                          + satellite + " "
                          + str(elevation))
@@ -155,8 +177,7 @@ class HRPT(object):
             elts.append((satellite, utctime, elevation,
                          data[self.line_size * i: self.line_size * (i+1)]))
             i += 1
-            
-        return elts, self.line_size * i
+        return elts, self.line_size * i, f_elev
         
         
 FORMATS = [CADU, HRPT]
@@ -180,19 +201,20 @@ class FileWatcher(FileSystemEventHandler):
         """
         with open(pathname) as fp_:
             try:
-                filereader, position = self._readers[pathname]
+                # FIXME: the _readers dict has to be cleaned up !!
+                filereader, position, f_elev = self._readers[pathname]
                 fp_.seek(position)
                 data = fp_.read()
-                elts, offset = filereader.read(data)
-                self._readers[pathname] = filereader, position + offset
+                elts, offset, f_elev = filereader.read(data, f_elev)
+                self._readers[pathname] = filereader, position + offset, f_elev
                 return elts
             except KeyError:
                 data = fp_.read()
                 for filetype in FORMATS:
                     if filetype.is_it(data):
                         filereader = filetype()
-                        elts, position = filereader.read(data)
-                        self._readers[pathname] = filereader, position
+                        elts, position, f_elev = filereader.read(data)
+                        self._readers[pathname] = filereader, position, f_elev
                         return elts
                 
     def start(self):
@@ -535,7 +557,11 @@ class RequestManager(Thread):
         self._loop = False
         self._socket.setsockopt(LINGER, 0)
         self._socket.close()
-        
+
+def set_subject(station):
+    global subject
+    subject = '/oper/polar/direct_readout/' + station
+
 def serve(configfile):
     """Serve forever.
     """
@@ -550,9 +576,20 @@ def serve(configfile):
         host = cfg.get("local_reception", "localhost")
 
         # for messages
-        global subject
         station = cfg.get("local_reception", "station")
-        subject = '/oper/polar/direct_readout/' + station
+        set_subject(station)
+
+        # for elevation
+        global coords
+        coords = cfg.get("local_reception", "coordinates")
+        coords = [float(coord) for coord in coords.split()]
+
+        global tle_files
+
+        try:
+            tle_files = cfg.get("local_reception", "tle_files")
+        except NoOptionError:
+            tle_files = None
 
         # publisher
         pubport = cfg.getint(host, "pubport")
