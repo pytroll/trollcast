@@ -112,6 +112,11 @@ configuration file. Add a ``-v`` if you want debugging info.
    acting as a gateway to another server, add
    ``mirror=name_of_the_primary_server`` in your configuration file.
 
+.. note::
+   
+   Don't forget to prepend "nohup" to the command if you want to make sure the
+   process doesn't shut down when you loggout fro the server.
+
 Client mode, retrieving data
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
