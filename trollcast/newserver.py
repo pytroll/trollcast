@@ -230,8 +230,8 @@ class FileWatcher(FileSystemEventHandler):
                     if filetype.is_it(data):
                         filereader = filetype()
 
-            for elt, position, f_elev in filereader.read(data, f_elev):
-                self._readers[pathname] = filereader, position, f_elev
+            for elt, offset, f_elev in filereader.read(data, f_elev):
+                self._readers[pathname] = filereader, position + offset, f_elev
                 yield elt
 
                 
