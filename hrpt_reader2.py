@@ -39,7 +39,7 @@ import struct
 def show(data, filename=None):
     """Show the stretched data.
     """
-    import Image as pil
+    from PIL import Image as pil
     img = pil.fromarray(np.array((data - data.min()) * 255.0 /
                                  (data.max() - data.min()), np.uint8))
     if filename:
