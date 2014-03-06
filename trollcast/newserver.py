@@ -305,10 +305,11 @@ class MirrorWatcher(Thread):
                 sat = message.data["satellite"]
                 key = strp_isoformat(message.data["timecode"])
                 elevation = message.data["elevation"]
+                quality = message.data.get("quality", 100)
                 data = _MirrorGetter(self._reqsocket,
                                      sat, key,
                                      self._lock)
-                self._holder.add(sat, key, elevation, data)
+                self._holder.add(sat, key, elevation, quality, data)
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
@@ -386,8 +387,9 @@ class MirrorWatcher2(Thread):
                 sat = message.data["satellite"]
                 key = strp_isoformat(message.data["timecode"])
                 elevation = message.data["elevation"]
+                quality = message.data.get("quality", 100)
                 data = _MirrorGetter2(self._req, sat, key)
-                self._holder.add(sat, key, elevation, data)
+                self._holder.add(sat, key, elevation, quality, data)
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
@@ -414,7 +416,7 @@ class DummyWatcher(Thread):
     def run(self):
         while self._loop:
             self._holder.add("NOAA 17", datetime.utcnow(),
-                             18, "dummy data")
+                             18, 100, "dummy data")
             self._event.wait(self._uri)
     
     def stop(self):
