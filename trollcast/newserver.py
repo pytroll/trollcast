@@ -65,7 +65,7 @@ def get_f_elev(satellite):
         """Get the elevation for the given *utctime*.
         """
         return orb.get_observer_look(utctime, *coords)[1]
-        
+    f_elev.satellite = satellite 
     return f_elev
 
         
@@ -137,16 +137,13 @@ class HRPT(object):
     def read(self, data, f_elev=None):
         """Read hrpt data.
         """
-        lines = np.fromstring(data, dtype=self.dtype,
-                              count=len(data)/self.line_size)
-        elts = []
 
         now = datetime.utcnow()
         year = now.year
 
-        i = 0
+        for i, line in enumerate(np.fromstring(data, dtype=self.dtype,
+                                               count=len(data)/self.line_size)):
 
-        for line in lines:
             days = self.timecode(line["timecode"])
             utctime = datetime(year, 1, 1) + days
             if utctime > now:
@@ -160,13 +157,27 @@ class HRPT(object):
 
             if qual != 100:
                 logger.info("Garbage line: " + str(utctime))
+                if f_elev is None:
+                    satellite = "unknown"
+                    continue
+                else:
+                    satellite = f_elev.satellite
+            else:
+                try:
+                    satellite = self.satellites[((line["id"]["id"] >> 3) & 15)]
+                except KeyError:
+                    satellite = "unknown"
             
-            satellite = self.satellites[((line["id"]["id"] >> 3) & 15)]
-
             if f_elev is None:
-                f_elev = get_f_elev(satellite)
+                if satellite != "unknown":
+                    f_elev = get_f_elev(satellite)
+                    elevation = f_elev(utctime)
+                else:
+                    elevation = -180
+            else:
+                elevation = f_elev(utctime)
 
-            elevation = f_elev(utctime)
+                
             logger.debug("Got line " + utctime.isoformat() + " "
                          + satellite + " "
                          + str(elevation))
@@ -177,10 +188,10 @@ class HRPT(object):
             # - serve also already present files
             # - timeout and close the file
 
-            elts.append((satellite, utctime, elevation, qual,
-                         data[self.line_size * i: self.line_size * (i+1)]))
-            i += 1
-        return elts, self.line_size * i, f_elev
+            yield ((satellite, utctime, elevation, qual,
+                    data[self.line_size * i: self.line_size * (i+1)]),
+                   self.line_size * (i+1), f_elev)
+
         
         
 FORMATS = [CADU, HRPT]
@@ -202,23 +213,27 @@ class FileWatcher(FileSystemEventHandler):
     def _reader(self, pathname):
         """Read the file
         """
+        # FIXME: the _readers dict has to be cleaned up !!
         with open(pathname) as fp_:
             try:
-                # FIXME: the _readers dict has to be cleaned up !!
                 filereader, position, f_elev = self._readers[pathname]
-                fp_.seek(position)
-                data = fp_.read()
-                elts, offset, f_elev = filereader.read(data, f_elev)
-                self._readers[pathname] = filereader, position + offset, f_elev
-                return elts
             except KeyError:
-                data = fp_.read()
+                position = 0
+                f_elev = None
+            else:
+                fp_.seek(position)
+                
+            data = fp_.read()
+
+            if position == 0:
                 for filetype in FORMATS:
                     if filetype.is_it(data):
                         filereader = filetype()
-                        elts, position, f_elev = filereader.read(data)
-                        self._readers[pathname] = filereader, position, f_elev
-                        return elts
+
+            for elt, position, f_elev in filereader.read(data, f_elev):
+                self._readers[pathname] = filereader, position, f_elev
+                yield elt
+
                 
     def start(self):
         """Start the file watcher
