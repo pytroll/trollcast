@@ -222,8 +222,12 @@ class FileWatcher(FileSystemEventHandler):
                 f_elev = None
             else:
                 fp_.seek(position)
-                
-            data = fp_.read()
+
+            try:
+                data = fp_.read()
+            except IOError, e:
+                logger.warning("Can't read file: " + str(e))
+                return
 
             if position == 0:
                 for filetype in FORMATS:
