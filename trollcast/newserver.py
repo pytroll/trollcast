@@ -45,7 +45,6 @@ from watchdog.observers import Observer
 from urlparse import urlparse
 import os
 import numpy as np
-import random
 from glob import glob
 
 logger = logging.getLogger(__name__)
@@ -367,7 +366,7 @@ class _MirrorGetter2(object):
                          {"type": "scanline",
                           "satellite": self._sat,
                           "utctime": self._key})
-        rep = Message.decode(self._req.send_and_recv(str(reqmsg), 0.3))
+        rep = Message.decode(self._req.send_and_recv(str(reqmsg), 300))
         # FIXME: check that there actually is data there.
         self._data = rep.data
         logger.debug("Retrieved scanline from mirror successfully")
