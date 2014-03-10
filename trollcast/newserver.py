@@ -214,30 +214,31 @@ class FileWatcher(FileSystemEventHandler):
         """Read the file
         """
         # FIXME: the _readers dict has to be cleaned up !!
-        with open(pathname) as fp_:
-            try:
-                filereader, position, f_elev = self._readers[pathname]
-            except KeyError:
-                position = 0
-                f_elev = None
-            else:
-                fp_.seek(position)
+        # FIXME: don't open the file each time.
+        try:
+            with open(pathname) as fp_:
+                try:
+                    filereader, position, f_elev = self._readers[pathname]
+                except KeyError:
+                    position = 0
+                    f_elev = None
+                else:
+                    fp_.seek(position)
 
-            try:
                 data = fp_.read()
-            except IOError, e:
-                logger.warning("Can't read file: " + str(e))
-                return
 
-            if position == 0:
-                for filetype in FORMATS:
-                    if filetype.is_it(data):
-                        filereader = filetype()
+                if position == 0:
+                    for filetype in FORMATS:
+                        if filetype.is_it(data):
+                            filereader = filetype()
 
-            for elt, offset, f_elev in filereader.read(data, f_elev):
-                self._readers[pathname] = filereader, position + offset, f_elev
-                yield elt
-
+                for elt, offset, f_elev in filereader.read(data, f_elev):
+                    self._readers[pathname] = filereader, position + offset, f_elev
+                    yield elt
+        except IOError, e:
+            logger.warning("Can't read file: " + str(e))
+            return
+                
                 
     def start(self):
         """Start the file watcher
