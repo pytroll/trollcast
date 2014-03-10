@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 Martin Raspaud
+# Copyright (c) 2012, 2014 Martin Raspaud
 
 # Author(s):
 
@@ -24,6 +24,7 @@
 """
 
 import logging
+import logging.handlers
 from datetime import datetime
 from trollcast.client import Client
 import argparse
@@ -40,10 +41,17 @@ if __name__ == '__main__':
     parser.add_argument("-f", "--config_file", required=True,
                         help="eg. sattorrent_local.cfg")
     parser.add_argument("satellite", nargs="+", help="eg. noaa_18")
-    parser.add_argument("-v", "--verbose", action="store_true")    
+    parser.add_argument("-l", "--log", help="File to log to.")
+    parser.add_argument("-v", "--verbose",
+                        help="Print out debug messages also.",
+                        action="store_true")
     args = parser.parse_args()
-
-    ch1 = logging.StreamHandler()
+    if args.log:
+        ch1 = logging.handlers.TimedRotatingFileHandler(args.log,
+                                                        when="midnight",
+                                                        backupCount=7)
+    else:
+        ch1 = logging.StreamHandler()
     ch1.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter('[%(levelname)s %(name)s %(asctime)s] %(message)s')

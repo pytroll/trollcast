@@ -32,16 +32,25 @@ logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
 
-    ch1 = logging.StreamHandler()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config_file")
+    parser.add_argument("-l", "--log", help="File to log to.")
+    parser.add_argument("-v", "--verbose",
+                        help="Print out debug messages also.",
+                        action="store_true")
+    args = parser.parse_args()
+
+    if args.log:
+        ch1 = logging.handlers.TimedRotatingFileHandler(args.log,
+                                                        when="midnight",
+                                                        backupCount=7)
+    else:
+        ch1 = logging.StreamHandler()
+
     ch1.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter('[%(levelname)s %(name)s %(asctime)s] %(message)s')
     ch1.setFormatter(formatter)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config_file")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger('').setLevel(logging.DEBUG)
