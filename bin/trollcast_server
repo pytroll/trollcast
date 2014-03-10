@@ -25,6 +25,7 @@
 
 import argparse
 import logging
+import logging.handlers
 from datetime import datetime
 from trollcast.server import serve
 
