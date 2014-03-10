@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012, 2013, 2014 SMHI
+# Copyright (c) 2014 Martin Raspaud
 
 # Author(s):
 
@@ -20,566 +20,891 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Trollcast, server side.
-
-Trollcasting is loosely based on the bittorrent concepts, and adapted to
-satellite data.
-
-Limitations:
- - HRPT specific at the moment
+"""New version of the trollcast server
 
 TODO:
- - Include files from a library, not only the currently written file to the
-   list of scanlines
- - Implement choking
- - de-hardcode filename
+ - mirror
+ - compute right elevation
+ - add lines when local client gets data (if missing)
+ - check that mirror server is alive
+ - shut down nicely
 """
-from __future__ import with_statement 
 
-import logging
-import os
 from ConfigParser import ConfigParser, NoOptionError
-from datetime import datetime, timedelta
-from fnmatch import fnmatch
-from glob import glob
-from threading import Thread, Lock, Event
-from urlparse import urlparse, urlunparse
-
-import numpy as np
-import time
-from posttroll import strp_isoformat
+from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
+from threading import Thread, Event, Lock
 from posttroll.message import Message
-from posttroll.subscriber import Subscriber
 from pyorbital.orbital import Orbital
+import logging
+import time
+from datetime import datetime, timedelta
+from posttroll import strp_isoformat
+from fnmatch import fnmatch
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
-from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK
+from pyinotify import (WatchManager, ProcessEvent, ThreadedNotifier,
+                       IN_MODIFY, IN_OPEN, IN_CLOSE_WRITE)
+from urlparse import urlparse
+import os
+import numpy as np
+from glob import glob
 
 logger = logging.getLogger(__name__)
 
-LINE_SIZE = 11090 * 2
-
-CACHE_SIZE = 32
-
-HRPT_SYNC = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224, 694,
-        990, 220, 409, 1010, 403, 654, 105, 62, 867, 75, 149, 320, 725, 668,
-        581, 866, 109, 166, 941, 1022, 59, 989, 182, 461, 197, 751, 359, 704,
-        66, 387, 238, 850, 746, 473, 573, 282, 6, 212, 169, 623, 761, 979, 338,
-        249, 448, 331, 911, 853, 536, 323, 703, 712, 370, 30, 900, 527, 977,
-        286, 158, 26, 796, 705, 100, 432, 515, 633, 77, 65, 489, 186, 101, 406,
-        560, 148, 358, 742, 113, 878, 453, 501, 882, 525, 925, 377, 324, 589,
-        594, 496, 972], dtype=np.uint16)
-HRPT_SYNC_START = np.array([644, 367, 860, 413, 527, 149], dtype=np.uint16)
-
-SATELLITES = {7: "NOAA 15",
-              3: "NOAA 16",
-              13: "NOAA 18",
-              15: "NOAA 19"}
-
-def timecode(tc_array):
-    word = tc_array[0]
-    day = word
-    word = tc_array[1]
-    msecs = ((127) & word) * 1024
-    word = tc_array[2]
-    msecs += word & 1023
-    msecs *= 1024
-    word = tc_array[3]
-    msecs += word & 1023
-    return timedelta(days=int(day/2 - 1), milliseconds=int(msecs))
-
-class Holder(object):
-
-    def __init__(self, configfile):
-        self._holder = {}
-        cfg = ConfigParser()
-        cfg.read(configfile)
-        host = cfg.get("local_reception", "localhost")
-        hostname = cfg.get(host, "hostname")
-        port = cfg.get(host, "pubport")
-        self._addr = hostname + ":" + port
-
-        self._station = cfg.get("local_reception", "station")
-
-        self._context = Context()
-        self._socket = self._context.socket(PUB)
-        self._socket.bind("tcp://*:" + port)
-        self._lock = Lock()
-        self._send_lock = Lock()
-        self._cache = []
-        
-        
-    def __del__(self, *args, **kwargs):
-        self._socket.close()
-
-    def get(self, *args, **kwargs):
-        return self._holder.get(*args, **kwargs)
-
-    def __getitem__(self, *args, **kwargs):
-        return self._holder.__getitem__(*args, **kwargs)
-    
-    def send_have(self, satellite, utctime, elevation):
-        """Sends 'have' message for *satellite*, *utctime*, *elevation*.
-        """
-        to_send = {}
-        to_send["satellite"] = satellite
-        to_send["timecode"] = utctime.isoformat()
-        to_send["elevation"] = elevation
-        to_send["origin"] = self._addr
-        msg = Message('/oper/polar/direct_readout/' + self._station, "have",
-                      to_send).encode()
-        with self._send_lock:
-            self._socket.send(msg)
-
-    def send_heartbeat(self, next_pass_time="unknown"):
-        to_send = {}
-        to_send["next_pass_time"] = next_pass_time
-        to_send["addr"] = self._addr
-        msg =  Message('/oper/polar/direct_readout/' + self._station,
-                       "heartbeat", to_send).encode()
-        logger.debug("sending heartbeat: " + str(msg))
-        with self._send_lock:
-            self._socket.send(msg)
-
-    def get_scanline(self, satellite, utctime):
-        info = self._holder[satellite][utctime]
-        if len(info) == 4:
-            return info[3]
-        else:
-            url = urlparse(self._holder[satellite][utctime][1])
-            with open(url.path, "rb") as fp_:
-                fp_.seek(self._holder[satellite][utctime][0])
-                return fp_.read(LINE_SIZE)
-
-
-        
-    def add_scanline(self, satellite, utctime, elevation, line_start, filename, line=None):
-        """Adds the scanline to the server. Typically used by the client to
-        signal newly received lines.
-        """
-        self._lock.acquire()
-        try:
-            if(satellite not in self._holder or
-               utctime not in self._holder[satellite]):
-                if line:
-                    self._holder.setdefault(satellite,
-                                            {})[utctime] = (line_start,
-                                                            filename,
-                                                            elevation,
-                                                            line)
-                    self._cache.append((satellite, utctime))
-                    while len(self._cache) > CACHE_SIZE:
-                        sat, deltime = self._cache[0]
-                        del self._cache[0]
-                        self._holder[sat][deltime] = \
-                                                self._holder[sat][deltime][:3]
-                        
-                else:
-                    self._holder.setdefault(satellite,
-                                            {})[utctime] = (line_start,
-                                                            filename,
-                                                            elevation)
-                self.send_have(satellite, utctime, elevation)
-        finally:
-            self._lock.release()
-        
-
-class FileStreamer(FileSystemEventHandler):
-    """Get the updates from files.
-
-    TODO: separate holder from file handling.
+def get_f_elev(satellite):
+    """Get the elevation function for a given satellite
     """
-    def __init__(self, holder, configfile, *args, **kwargs):
-        FileSystemEventHandler.__init__(self, *args, **kwargs)
-        self._file = None
-        self._filename = ""
-        self._where = 0
-        self._satellite = ""
-        self._orbital = None
-        cfg = ConfigParser()
-        cfg.read(configfile)
-        self._coords = cfg.get("local_reception", "coordinates").split(" ")
-        self._coords = [float(self._coords[0]),
-                        float(self._coords[1]),
-                        float(self._coords[2])]
-        self._station = cfg.get("local_reception", "station")
-        logger.debug("Station " + self._station +
-                     " located at: " + str(self._coords))
-        try:
-            self._tle_files = cfg.get("local_reception", "tle_files")
-        except NoOptionError:
-            self._tle_files = None
 
-        self._file_pattern = cfg.get("local_reception", "file_pattern")
+    if tle_files is not None:
+        filelist = glob(tle_files)
+        tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
+    else:
+        tle_file = None
+
+    orb = Orbital(satellite.upper(), tle_file)
+    def f_elev(utctime):
+        """Get the elevation for the given *utctime*.
+        """
+        return orb.get_observer_look(utctime, *coords)[1]
+    f_elev.satellite = satellite 
+    return f_elev
+
         
-        self.scanlines = holder
+class CADU(object):
+    """The cadu reader class
+    """
+    @staticmethod
+    def is_it(data):
+        return False
 
-        self._warn = True
-        
-    def update_satellite(self, satellite):
-        """Update satellite and renew the orbital instance.
-        """
-        if satellite != self._satellite:
-            self._satellite = satellite
-            if self._tle_files is not None:
-                filelist = glob(self._tle_files)
-                tle_file = max(filelist, key=lambda x: os.stat(x).st_mtime)
-            else:
-                tle_file = None
-            self._orbital = Orbital(self._satellite.upper(), tle_file)
-
-    def on_created(self, event):
-        """Callback when file is created.
-        """
-        if event.src_path != self._filename:
-            if self._filename:
-                logger.info("Closing: " + self._filename)
-            if self._file:
-                self._file.close()
-            self._file = None
-            self._filename = ""
-            self._where = 0
-            self._satellite = ""
-            self._warn = True
-        logger.info("New file detected: " + event.src_path)
-
-
-    def on_opened(self, event):
-        """Callback when file is opened
-        """
-        fname = os.path.split(event.src_path)[1]
-        if self._file is None and fnmatch(fname, self._file_pattern):
-            logger.info("File opened: " + event.src_path)
-            self._filename = event.src_path
-            self._file = open(event.src_path, "rb")
-            self._where = 0
-            self._satellite = ""
-
-            self._orbital = None
-            self._warn = True
-
-    def on_modified(self, event):
-        self.on_opened(event)
-
-        if event.src_path != self._filename:
-            return
-            
-        self._file.seek(self._where)
-        line = self._file.read(LINE_SIZE)
-        while len(line) == LINE_SIZE:
-            line_start = self._where
-            self._where = self._file.tell()
-            dtype = np.dtype([('frame_sync', '>u2', (6, )),
-                              ('id', [('id', '>u2'),
-                                      ('spare', '>u2')]),
+class HRPT(object):
+    """The hrpt reader class
+    """
+    dtype = np.dtype([('frame_sync', '>u2', (6, )),
+                      ('id', [('id', '>u2'),
+                              ('spare', '>u2')]),
                               ('timecode', '>u2', (4, )),
-                              ('telemetry', [("ramp_calibration", '>u2', (5, )),
-                                             ("PRT", '>u2', (3, )),
-                                             ("ch3_patch_temp", '>u2'),
-                                             ("spare", '>u2'),]),
-                              ('back_scan', '>u2', (10, 3)),
-                              ('space_data', '>u2', (10, 5)),
-                              ('sync', '>u2'),
-                              ('TIP_data', '>u2', (520, )),
-                              ('spare', '>u2', (127, )),
-                              ('image_data', '>u2', (2048, 5)),
-                              ('aux_sync', '>u2', (100, ))])
+                      ('telemetry', [("ramp_calibration", '>u2', (5, )),
+                                     ("PRT", '>u2', (3, )),
+                                     ("ch3_patch_temp", '>u2'),
+                                     ("spare", '>u2'),]),
+                      ('back_scan', '>u2', (10, 3)),
+                      ('space_data', '>u2', (10, 5)),
+                      ('sync', '>u2'),
+                      ('TIP_data', '>u2', (520, )),
+                      ('spare', '>u2', (127, )),
+                      ('image_data', '>u2', (2048, 5)),
+                      ('aux_sync', '>u2', (100, ))])
+    
+    hrpt_sync = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224,
+                           694, 990, 220, 409, 1010, 403, 654, 105, 62, 867,
+                           75, 149, 320, 725, 668, 581, 866, 109, 166, 941,
+                           1022, 59, 989, 182, 461, 197, 751, 359, 704, 66,
+                           387, 238, 850, 746, 473, 573, 282, 6, 212, 169, 623,
+                           761, 979, 338, 249, 448, 331, 911, 853, 536, 323,
+                           703, 712, 370, 30, 900, 527, 977, 286, 158, 26, 796,
+                           705, 100, 432, 515, 633, 77, 65, 489, 186, 101, 406,
+                           560, 148, 358, 742, 113, 878, 453, 501, 882, 525,
+                           925, 377, 324, 589, 594, 496, 972], dtype=np.uint16)
 
+    hrpt_sync_start = np.array([644, 367, 860, 413, 527, 149], dtype=np.uint16)
 
-            array = np.fromstring(line, dtype=dtype)
-            if np.all(abs(HRPT_SYNC_START - 
-                          array["frame_sync"]) > 1):
-                array = array.newbyteorder()
-                
-            # FIXME: this means server can only share 1 year of hrpt data.
-            now = datetime.utcnow()
-            year = now.year
-            utctime = datetime(year, 1, 1) + timecode(array["timecode"][0])
+    satellites = {7: "NOAA 15",
+                  3: "NOAA 16",
+                  13: "NOAA 18",
+                  15: "NOAA 19"}
+
+    line_size = 11090 * 2
+
+    @staticmethod
+    def is_it(data):
+        return True
+
+    @staticmethod
+    def timecode(tc_array):
+        """HRPT timecode reading
+        """
+        word = tc_array[0]
+        day = word
+        word = tc_array[1]
+        msecs = ((127) & word) * 1024
+        word = tc_array[2]
+        msecs += word & 1023
+        msecs *= 1024
+        word = tc_array[3]
+        msecs += word & 1023
+        return timedelta(days=int(day/2 - 1), milliseconds=int(msecs))
+
+    def read(self, data, f_elev=None):
+        """Read hrpt data.
+        """
+
+        now = datetime.utcnow()
+        year = now.year
+
+        for i, line in enumerate(np.fromstring(data, dtype=self.dtype,
+                                               count=len(data)/self.line_size)):
+
+            days = self.timecode(line["timecode"])
+            utctime = datetime(year, 1, 1) + days
             if utctime > now:
                 # Can't have data from the future... yet :)
-                utctime = (datetime(year - 1, 1, 1)
-                           + timecode(array["timecode"][0]))
+                utctime = datetime(year - 1, 1, 1) + days
 
-            # Check that we receive real-time data
-            if not (np.all(array['aux_sync'] == HRPT_SYNC) and
-                    np.all(array['frame_sync'] == HRPT_SYNC_START)):
+            qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
+                    np.sum(line['frame_sync'] == self.hrpt_sync_start))
+            qual = (100*qual)/106
+            logger.info("Quality " + str(qual))
+
+            if qual != 100:
                 logger.info("Garbage line: " + str(utctime))
-                line = self._file.read(LINE_SIZE)
-                continue
+                if f_elev is None:
+                    satellite = "unknown"
+                    yield ((satellite, utctime, None, qual,
+                            data[self.line_size * i: self.line_size * (i+1)]),
+                           self.line_size * (i+1), f_elev)
+                    continue
+                else:
+                    satellite = f_elev.satellite
+            else:
+                try:
+                    satellite = self.satellites[((line["id"]["id"] >> 3) & 15)]
+                except KeyError:
+                    satellite = "unknown"
+            
+            if f_elev is None:
+                if satellite != "unknown":
+                    f_elev = get_f_elev(satellite)
+                    elevation = f_elev(utctime)
+                else:
+                    elevation = -180
+            else:
+                elevation = f_elev(utctime)
 
-            if (now - utctime).days > 7 and self._warn:
-                logger.warning("Data is more than a week old: " + str(utctime))
-                self._warn = False
                 
-            satellite = SATELLITES[((array["id"]["id"] >> 3) & 15)[0]]
-            self.update_satellite(satellite)
-
-            elevation = self._orbital.get_observer_look(utctime,
-                                                        *self._coords)[1]
             logger.debug("Got line " + utctime.isoformat() + " "
-                         + self._satellite + " "
+                         + satellite + " "
                          + str(elevation))
-
 
             
             # TODO:
             # - serve also already present files
             # - timeout and close the file
-            self.scanlines.add_scanline(self._satellite, utctime,
-                                        elevation, line_start, self._filename,
-                                        line)
 
-            line = self._file.read(LINE_SIZE)
+            yield ((satellite, utctime, elevation, qual,
+                    data[self.line_size * i: self.line_size * (i+1)]),
+                   self.line_size * (i+1), f_elev)
 
-        self._file.seek(self._where)        
+        
+        
+FORMATS = [CADU, HRPT]
 
-class MirrorStreamer(Thread):
-    """Act as a relay...
+
+class WDFileWatcher(FileSystemEventHandler):
+    """Watch files
+    """
+    def __init__(self, holder, uri):
+        FileSystemEventHandler.__init__(self)
+        self._holder = holder
+        self._uri = uri
+        self._loop = True
+        self._notifier = Observer()
+        self._path, self._pattern = os.path.split(urlparse(self._uri).path)
+        self._notifier.schedule(self, self._path, recursive=False)
+        self._readers = {}
+
+    def _reader(self, pathname):
+        """Read the file
+        """
+        # FIXME: the _readers dict has to be cleaned up !!
+        # FIXME: don't open the file each time.
+        try:
+            with open(pathname) as fp_:
+                try:
+                    filereader, position, f_elev = self._readers[pathname]
+                except KeyError:
+                    position = 0
+                    f_elev = None
+                else:
+                    fp_.seek(position)
+
+                data = fp_.read()
+
+                if position == 0:
+                    for filetype in FORMATS:
+                        if filetype.is_it(data):
+                            filereader = filetype()
+
+                for elt, offset, f_elev in filereader.read(data, f_elev):
+                    self._readers[pathname] = filereader, position + offset, f_elev
+                    yield elt
+        except IOError, e:
+            logger.warning("Can't read file: " + str(e))
+            return
+                
+                
+    def start(self):
+        """Start the file watcher
+        """
+        self._notifier.start()
+
+    def stop(self):
+        """Stop the file watcher
+        """
+        self._notifier.stop()
+
+    def on_modified(self, event):
+        path, fname = os.path.split(event.src_path)
+        del path
+        if not fnmatch(fname, self._pattern):
+            return
+        
+        for sat, key, elevation, qual, data in self._reader(event.src_path):
+            self._holder.add(sat, key, elevation, qual, data)
+
+class FileWatcher(object):
+
+    def __init__(self, holder, uri):
+        
+        self._wm = WatchManager()
+        self._notifier = ThreadedNotifier(self._wm, _EventHandler(holder, uri))
+        self._path, self._pattern = os.path.split(urlparse(uri).path)
+    
+    def start(self):
+        """Start the file watcher
+        """
+        self._notifier.start()
+        self._wm.add_watch(self._path, IN_OPEN | IN_CLOSE_WRITE | IN_MODIFY)
+
+    def stop(self):
+        """Stop the file watcher
+        """
+        self._notifier.stop()
+  
+
+class _EventHandler(ProcessEvent):
+    """Watch files
+    """
+    def __init__(self, holder, uri):
+        ProcessEvent.__init__(self)
+        self._holder = holder
+        self._uri = uri
+        self._loop = True
+
+        self._path, self._pattern = os.path.split(urlparse(self._uri).path)
+
+        self._readers = {}
+        self._fp = None
+
+    def _reader(self, pathname):
+        """Read the file
+        """
+        try:
+            try:
+                filereader, position, f_elev = self._readers[pathname]
+            except KeyError:
+                position = 0
+                f_elev = None
+            else:
+                self._fp.seek(position)
+
+            data = self._fp.read()
+
+            if position == 0:
+                for filetype in FORMATS:
+                    if filetype.is_it(data):
+                        filereader = filetype()
+
+            for elt, offset, f_elev in filereader.read(data, f_elev):
+                self._readers[pathname] = filereader, position + offset, f_elev
+                yield elt
+        except IOError, err:
+            logger.warning("Can't read file: " + str(err))
+            return
+                
+                
+    def process_IN_OPEN(self, event):
+        """When the file opens.
+        """
+        
+        fname = os.path.basename(event.pathname)
+
+        if self._fp is None and fnmatch(fname, self._pattern):
+            self._fp = open(event.pathname)
+
+        return self._fp is not None
+    
+    def process_IN_MODIFY(self, event):
+        """File has been modified, read it !
+        """
+
+        if not self.process_IN_OPEN(event):
+            return
+
+        fname = os.path.basename(event.pathname)
+
+        if not fnmatch(fname, self._pattern):
+            return
+        
+        for sat, key, elevation, qual, data in self._reader(event.pathname):
+            self._holder.add(sat, key, elevation, qual, data)
+
+    def process_IN_CLOSE_WRITE(self, event):
+        """Clean up.
+        """
+        self._fp.close()
+        self._fp = None
+        del self._readers[event.pathname]
+
+
+class _MirrorGetter(object):
+    """Gets data from the mirror when needed.
     """
 
-    def __init__(self, holder, configfile):
+    def __init__(self, socket, sat, key, lock):
+        self._socket = socket
+        self._sat = sat
+        self._key = key
+        self._lock = lock
+        self._data = None
+
+    def get_data(self):
+        """Get the actual data from the server we're mirroring
+        """
+        if self._data is not None:
+            return self._data
+
+        logger.debug("Grabbing scanline from mirror")
+        req = Message(subject,
+                      'request',
+                      {"type": "scanline",
+                       "satellite": self._sat,
+                       "utctime": self._key})
+        with self._lock:
+            self._socket.send(str(req))
+            rep = Message.decode(self._socket.recv())
+        # FIXME: check that there actually is data there.
+        self._data = rep.data
+        logger.debug("Retrieved scanline from mirror successfully")
+        return self._data
+    
+    def __str__(self):
+        return self.get_data()
+
+    def __add__(self, other):
+        return str(self) + other
+
+    def __radd__(self, other):
+        return other + str(self)
+
+class MirrorWatcher(Thread):
+    """Watches a other server.
+    """
+
+    def __init__(self, holder, context, host, pubport, reqport):
         Thread.__init__(self)
+        self._holder = holder
+        self._pubaddress = "tcp://" + host + ":" + str(pubport)
+        self._reqaddress = "tcp://" + host + ":" + str(reqport)
+
+        self._reqsocket = context.socket(REQ)
+        self._reqsocket.connect(self._reqaddress)
+
+        self._subsocket = context.socket(SUB)
+        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
+        self._subsocket.connect(self._pubaddress)
+        self._lock = Lock()
+        self._loop = True
         
-        self.scanlines = holder
+    def run(self):
+        while self._loop:
+            message = Message.decode(self._subsocket.recv())
+            if message.type == "have":
+                sat = message.data["satellite"]
+                key = strp_isoformat(message.data["timecode"])
+                elevation = message.data["elevation"]
+                quality = message.data.get("quality", 100)
+                data = _MirrorGetter(self._reqsocket,
+                                     sat, key,
+                                     self._lock)
+                self._holder.add(sat, key, elevation, quality, data)
+            if message.type == "heartbeat":
+                logger.debug("Got heartbeat from " + str(self._pubaddress)
+                             + ": " + str(message))
+
+    def stop(self):
+        """Stop the watcher
+        """
+        self._loop = False
+        self._reqsocket.setsockopt(LINGER, 0)
+        self._reqsocket.close()
+        self._subsocket.setsockopt(LINGER, 0)
+        self._subsocket.close()
+
+from trollcast.client import SimpleRequester
+
+class _MirrorGetter2(object):
+    """Gets data from the mirror when needed.
+    """
+
+    def __init__(self, req, sat, key):
+        self._req = req
+        self._sat = sat
+        self._key = key
+        self._data = None
+
+    def get_data(self):
+        """Get the actual data from the server we're mirroring
+        """
+        if self._data is not None:
+            return self._data
+
+        logger.debug("Grabbing scanline from mirror")
+        reqmsg = Message(subject,
+                         'request',
+                         {"type": "scanline",
+                          "satellite": self._sat,
+                          "utctime": self._key})
+        rep = self._req.send_and_recv(str(reqmsg), 300)
+        # FIXME: check that there actually is data there.
+        self._data = rep.data
+        logger.debug("Retrieved scanline from mirror successfully")
+        return self._data
+    
+    def __str__(self):
+        return self.get_data()
+
+    def __add__(self, other):
+        return str(self) + other
+
+    def __radd__(self, other):
+        return other + str(self)
+
+class MirrorWatcher2(Thread):
+    """Watches a other server.
+    """
+
+    def __init__(self, holder, context, host, pubport, reqport):
+        Thread.__init__(self)
+        self._holder = holder
+        self._pubaddress = "tcp://" + host + ":" + str(pubport)
+        self._reqaddress = "tcp://" + host + ":" + str(reqport)
+
+        self._req = SimpleRequester(host, reqport, context)
+
+        self._subsocket = context.socket(SUB)
+        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
+        self._subsocket.connect(self._pubaddress)
+        self._lock = Lock()
+        self._loop = True
         
-        cfg = ConfigParser()
-        cfg.read(configfile)
-        host = cfg.get("local_reception", "mirror")
-        hostname = cfg.get(host, "hostname")
-        port = cfg.get(host, "pubport")
-        rport = cfg.get(host, "reqport")
-        address = "tcp://" + hostname + ":" + port
-        self._sub = Subscriber([address], "hrpt 0")
-        self._reqaddr = "tcp://" + hostname + ":" + rport
+    def run(self):
+        while self._loop:
+            message = Message.decode(self._subsocket.recv())
+            if message.type == "have":
+                sat = message.data["satellite"]
+                key = strp_isoformat(message.data["timecode"])
+                elevation = message.data["elevation"]
+                quality = message.data.get("quality", 100)
+                data = _MirrorGetter2(self._req, sat, key)
+                self._holder.add(sat, key, elevation, quality, data)
+            if message.type == "heartbeat":
+                logger.debug("Got heartbeat from " + str(self._pubaddress)
+                             + ": " + str(message))
+
+    def stop(self):
+        """Stop the watcher
+        """
+        self._loop = False
+        self._req.stop()
+        self._subsocket.setsockopt(LINGER, 0)
+        self._subsocket.close()
+
+        
+class DummyWatcher(Thread):
+    """Dummy watcher for test purposes
+    """
+    def __init__(self, holder, uri):
+        Thread.__init__(self)
+        self._holder = holder
+        self._uri = uri
+        self._loop = True
+        self._event = Event()
 
     def run(self):
-
-        for message in self._sub.recv(1):
-            if message is None:
-                continue
-            if(message.type == "have"):
-                logger.debug("Relaying " + str(message.data["timecode"]))
-                self.scanlines.add_scanline(message.data["satellite"],
-                                            strp_isoformat(message.data["timecode"]),
-                                            message.data["elevation"],
-                                            None,
-                                            self._reqaddr)
-            # Don't forward the heartbeat!
-            #if(message.type) == "heartbeat":
-            #    self.scanlines._socket.send(str(message))
-                
-    def stop(self):
-        """Stop streaming.
-        """
-        self._sub.stop()
-        
-class Looper(object):
-
-    def __init__(self):
-        self._loop = True
-
-    def stop(self):
-        self._loop = False
-
-class Socket(object):
-    def __init__(self, addr, stype):
-        self._context = Context()
-        self._socket = self._context.socket(stype)
-        if stype in [REP, PUB]:
-            self._socket.bind(addr)
-        else:
-            self._socket.connect(addr)
-
-    def __del__(self, *args, **kwargs):
-        self._socket.close()
-
-class SocketLooper(Socket, Looper):
+        while self._loop:
+            self._holder.add("NOAA 17", datetime.utcnow(),
+                             18, 100, "dummy data")
+            self._event.wait(self._uri)
     
-    def __init__(self, *args, **kwargs):
-        Looper.__init__(self)
-        Socket.__init__(self, *args, **kwargs)
+    def stop(self):
+        """Stop adding stuff
+        """
+        self._loop = False
+        self._event.set()
 
-class SocketLooperThread(SocketLooper, Thread):
-    def __init__(self, *args, **kwargs):
+class Cleaner(Thread):
+    """Dummy watcher for test purposes
+    """
+    def __init__(self, holder, delay):
         Thread.__init__(self)
-        SocketLooper.__init__(self, *args, **kwargs)
+        self._holder = holder
+        self._interval = 60
+        self._delay = delay
+        self._loop = True
+        self._event = Event()
+
+    def clean(self):
+        """Clean the db
+        """
+        logger.debug("Cleaning")
+        for sat in self._holder.sats():
+            satlines = self._holder.get_sat(sat)
+            for key in sorted(satlines):
+                if key < datetime.utcnow() - timedelta(hours=self._delay):
+                    self._holder.delete(sat, key)
+            
+                
+
+    def run(self):
+        while self._loop:
+            self.clean()
+            self._event.wait(self._interval)
+    
+    def stop(self):
+        """Stop adding stuff
+        """
+        self._loop = False
+        self._event.set()
+    
+class Holder(object):
+    """The mighty data holder
+    """
+    
+    def __init__(self, pub, origin):
+        self._data = {}
+        self._pub = pub
+        self._origin = origin
+        self._lock = Lock()
+
+    def delete(self, sat, key):
+        """Delete item
+        """
+        logger.debug("Removing from memory: " + str((sat, key)))
+        with self._lock:
+            del self._data[sat][key]
+
+    def get_sat(self, sat):
+        """Get the data for a given satellite *sat*.
+        """
+        return self._data[sat]
+
+    def sats(self):
+        """return the satellites in store.
+        """
+        return self._data.keys()
+        
+    def get(self, sat, key):
+        """get the value of *sat* and *key*
+        """
+        with self._lock:
+            return self._data[sat][key]
+
+    def get_data(self, sat, key):
+        """get the data of *sat* and *key*
+        """
+        return self.get(sat, key)[2]
+
+    def add(self, sat, key, elevation, qual, data):
+        """Add some data.
+        """
+        with self._lock:
+            self._data.setdefault(sat, {})[key] = elevation, qual, data
+        logger.debug("Got stuff for " + str((sat, key, elevation, qual)))
+        self.have(sat, key, elevation, qual)
+
+    def have(self, sat, key, elevation, qual):
+        """Tell the world about our new data.
+        """
+        to_send = {}
+        to_send["satellite"] = sat
+        to_send["timecode"] = key
+        to_send["elevation"] = elevation
+        to_send["quality"] = qual
+        to_send["origin"] = self._origin
+        msg = Message(subject, "have", to_send).encode()
+        self._pub.send(msg)
+        
+class Publisher(object):
+    """Publish stuff.
+    """
+    def __init__(self, context, port):
+        self._context = context
+        self._socket = self._context.socket(PUB)
+        self._socket.bind("tcp://*:" + str(port))
+        self._lock = Lock()
+
+    def send(self, message):
+        """Publish something
+        """
+        with self._lock:
+            self._socket.send(str(message))
+
+    def stop(self):
+        """Stop publishing.
+        """
+        with self._lock:
+            self._socket.setsockopt(LINGER, 0)
+            self._socket.close()
 
 class Heart(Thread):
-    def __init__(self, holder, *args, **kwargs):
-        Thread.__init__(self, *args, **kwargs)
-        self.loop = True
-        self.holder = holder
-        self.event = Event()
-        self.interval = 300
+    """Send heartbeats once in a while.
+    """
+
+    def __init__(self, pub, address, interval):
+        Thread.__init__(self)
+        self._loop = True
+        self._event = Event()
+        self._address = address
+        self._pub = pub
+        self._interval = interval
 
     def run(self):
-        while self.loop:
-            self.holder.send_heartbeat()
-            self.event.wait(self.interval)
-
+        while self._loop:
+            to_send = {}
+            to_send["next_pass_time"] = "unknown"
+            to_send["addr"] = self._address
+            msg =  Message(subject, "heartbeat", to_send).encode()
+            logger.debug("sending heartbeat: " + str(msg))
+            self._pub.send(msg)
+            self._event.wait(self._interval)
+            
     def stop(self):
-        self.loop = False
-        self.event.set()
+        """Cardiac arrest
+        """
+        self._loop = False
+        self._event.set()
 
-class Responder(SocketLooperThread):
+class RequestManager(Thread):
+    """Manage requests.
+    """
 
-    # TODO: this should not respond to everyone. It should check if the
-    # requester is listed in the configuration file...
-    
-    def __init__(self, holder, configfile, *args, **kwargs):
-        SocketLooperThread.__init__(self, *args, **kwargs)
+    def __init__(self, context, holder, port, station):
+        Thread.__init__(self)
+
         self._holder = holder
         self._loop = True
-
-        cfg = ConfigParser()
-        cfg.read(configfile)
-        self._station = cfg.get("local_reception", "station")
-
-        self.mirrors = {}
-
-
-    def __del__(self, *args, **kwargs):
-        self._socket.close()
-        for mirror in self.mirrors.values():
-            mirror.close()
-            
+        self._port = port
+        self._station = station
+        self._lock = Lock()
+        self._socket = context.socket(REP)
+        self._socket.bind("tcp://*:" + str(self._port))
+        self._poller = Poller()
+        self._poller.register(self._socket, POLLIN)
         
-    def forward_request(self, address, message):
-        """Forward a request to another server.
-        """
-        # FIXME: shouldn't we have an open socket at all times ?
-        if address not in self.mirrors:
-            context = Context()
-            socket = context.socket(REQ)
-            socket.connect(address)
-            self.mirrors[address] = socket
+    def send(self, message):
+        if message.binary:
+            logger.debug("Response: " + " ".join(str(message).split()[:6]))
         else:
-            socket = self.mirrors[address]
-        socket.send(str(message))
-        return socket.recv()
+            logger.debug("Response: " + str(message))
+        self._socket.send(str(message))
 
+    def pong(self):
+        return Message(subject, "pong", {"station": self._station})
 
-    def run(self):
-        poller = Poller()
-        poller.register(self._socket, POLLIN)
+    def scanline(self, message):
+        sat = message.data["satellite"]
+        key = strp_isoformat(message.data["utctime"])
+        try:
+            data = self._holder.get_data(sat, key)
+        except KeyError:
+            resp = Message(subject, "missing")
+        else:
+            resp = Message(subject, "scanline", data, binary=True)
+        return resp
+            
+    def notice(self, message):
+        return Message(subject, "ack")
+
+    def unknown(self, message):
+        return Message(subject, "unknown")
         
+    def run(self):
         while self._loop:
-            socks = dict(poller.poll(timeout=2000))
+            try:
+                socks = dict(self._poller.poll(timeout=2000))
+            except ZMQError:
+                logger.info("Poller interrupted.")
+                continue
             if self._socket in socks and socks[self._socket] == POLLIN:
-                message = Message(rawstr=self._socket.recv(NOBLOCK))
-                logger.debug("Request: " + str(message))
-                # send list of scanlines
-                if(message.type == "request" and
-                   message.data["type"] == "scanlines"):
-                    sat = message.data["satellite"]
-                    epoch = "1950-01-01T00:00:00"
-                    start_time = strp_isoformat(message.data.get("start_time",
-                                                                 epoch))
-                    end_time = strp_isoformat(message.data.get("end_time",
-                                                               epoch))
-
-                    resp = Message('/oper/polar/direct_readout/' + self._station,
-                                   "scanlines",
-                                   [(utctime.isoformat(),
-                                     self._holder[sat][utctime][2])
-                                    for utctime in self._holder.get(sat, [])
-                                    if utctime >= start_time
-                                    and utctime <= end_time])
-                    self._socket.send(str(resp))
-
-                # send one scanline
-                elif(message.type == "request" and
-                     message.data["type"] == "scanline"):
-                    sat = message.data["satellite"]
-                    utctime = strp_isoformat(message.data["utctime"])
+                logger.debug("Received a request, waiting for the lock")
+                with self._lock:
+                    message = Message(rawstr=self._socket.recv(NOBLOCK))
+                    logger.debug("processing request: " + str(message))
+                    reply = Message(subject, "error")
                     try:
-                        url = urlparse(self._holder[sat][utctime][1])
-                    except KeyError:
-                        resp = Message('/oper/polar/direct_readout/'
-                                       + self._station,
-                                       "missing")
-                    else:
-                        if url.scheme in ["", "file"]: # data is locally stored.
-                            resp = Message('/oper/polar/direct_readout/'
-                                           + self._station,
-                                           "scanline",
-                                           self._holder.get_scanline(sat, utctime),
-                                           binary=True)
-                        else: # it's the address of a remote server.
-                            resp = self.forward_request(urlunparse(url),
-                                                        message)
-                    self._socket.send(str(resp))
+                        if message.type == "ping":
+                            reply = self.pong()
+                        elif (message.type == "request" and
+                            message.data["type"] == "scanline"):
+                            reply = self.scanline(message)
+                        elif (message.type == "notice" and
+                              message.data["type"] == "scanline"):
+                            reply = self.notice(message)
+                        else: # unknown request
+                            reply = self.unknown(message)
+                    finally:
+                        self.send(reply)
+            else: # timeout
+                pass
 
-                # take in a new scanline
-                elif(message.type == "notice" and
-                     message.data["type"] == "scanline"):
-                    sat = message.data["satellite"]
-                    utctime = message.data["utctime"]
-                    elevation = message.data["elevation"]
-                    filename = message.data["filename"]
-                    line_start = message.data["file_position"]
-                    utctime = strp_isoformat(utctime)
-                    self._holder.add_scanline(sat, utctime, elevation,
-                                              line_start, filename)
-                    resp = Message('/oper/polar/direct_readout/'
-                                       + self._station,
-                                       "notice",
-                                       "ack")
-                    self._socket.send(str(resp))
-                elif(message.type == "ping"):
-                    resp = Message('/oper/polar/direct_readout/'
-                                   + self._station,
-                                   "pong",
-                                   {"station": self._station})
-                    self._socket.send(str(resp))
-
-                if resp.binary:
-                    logger.debug("Response: " + " ".join(str(resp).split()[:6]))
-                else:
-                    logger.debug("Response: " + str(resp))
-                
     def stop(self):
+        """Stop the request manager.
+        """
         self._loop = False
+        self._socket.setsockopt(LINGER, 0)
+        self._socket.close()
 
+def set_subject(station):
+    global subject
+    subject = '/oper/polar/direct_readout/' + station
 
 def serve(configfile):
     """Serve forever.
     """
 
-    scanlines = Holder(configfile)
-    heartbeat = Heart(scanlines)
-    fstreamer = FileStreamer(scanlines, configfile)
-    notifier = Observer()
-    cfg = ConfigParser()
-    cfg.read(configfile)
-    path = cfg.get("local_reception", "data_dir")
-    notifier.schedule(fstreamer, path, recursive=False)
-    
+    context = Context()
 
-    local_station = cfg.get("local_reception", "localhost")
-    responder_port = cfg.get(local_station, "reqport")
-    responder = Responder(scanlines, configfile,
-                          "tcp://*:" + responder_port, REP)
-    responder.start()
-    heartbeat.start()
-    mirror = None
     try:
-        mirror = MirrorStreamer(scanlines, configfile)
-        mirror.start()
-    except NoOptionError:
-        pass
-    
-    notifier.start()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        notifier.stop()
-    
-    responder.stop()
-    heartbeat.stop()
-    notifier.join()
-
-    if mirror is not None:
-        mirror.stop()
+        cfg = ConfigParser()
+        cfg.read(configfile)
         
+        host = cfg.get("local_reception", "localhost")
+
+        # for messages
+        station = cfg.get("local_reception", "station")
+        set_subject(station)
+
+        # for elevation
+        global coords
+        coords = cfg.get("local_reception", "coordinates")
+        coords = [float(coord) for coord in coords.split()]
+
+        global tle_files
+
+        try:
+            tle_files = cfg.get("local_reception", "tle_files")
+        except NoOptionError:
+            tle_files = None
+
+        # publisher
+        pubport = cfg.getint(host, "pubport")
+        pub = Publisher(context, pubport)
+
+        # heart
+        hostname = cfg.get(host, "hostname")
+        pubaddress = hostname + ":" + str(pubport)
+        heart = Heart(pub, pubaddress, 30)
+        heart.start()
+
+        # holder
+        holder = Holder(pub, pubaddress)
+
+        # cleaner
+
+        cleaner = Cleaner(holder, 1)
+        cleaner.start()
+
+        # watcher
+        #watcher = DummyWatcher(holder, 2)
+        path = cfg.get("local_reception", "data_dir")
+        watcher = None
+        if not os.path.exists(path):
+            logger.warning(path + " doesn't exist, not getting data from files")
+        else:
+            pattern = cfg.get("local_reception", "file_pattern")
+        
+            watcher = FileWatcher(holder, os.path.join(path, pattern))
+            watcher.start()
+
+        mirror_watcher = None
+        try:
+            mirror = cfg.get("local_reception", "mirror")
+        except NoOptionError:
+            pass
+        else:
+            pubport_m = cfg.getint(mirror, "pubport")
+            reqport_m = cfg.getint(mirror, "reqport")
+            mirror_watcher = MirrorWatcher2(holder, context,
+                                            mirror, pubport_m, reqport_m)
+            mirror_watcher.start()
+
+        # request manager
+        reqport = cfg.getint(host, "reqport")
+        reqman = RequestManager(context, holder, reqport, station)
+        reqman.start()
+
+        while True:
+            time.sleep(10000)
+
+    except KeyboardInterrupt:
+        pass
+    except:
+        logger.exception("There was an error!")
+        raise
+    finally:
+        try:
+            reqman.stop()
+        except UnboundLocalError:
+            pass
+        
+        try:
+            if mirror_watcher is not None:
+                mirror_watcher.stop()
+        except UnboundLocalError:
+            pass
+
+        try:
+            if watcher is not None:
+                watcher.stop()
+        except UnboundLocalError:
+            pass
+        try:
+            cleaner.stop()
+        except UnboundLocalError:
+            pass
+        try:
+            heart.stop()
+        except UnboundLocalError:
+            pass
+        try:
+            pub.stop()
+        except UnboundLocalError:
+            pass
+        try:
+            context.term()
+        except ZMQError:
+            pass
+
+
+        
+if __name__ == '__main__':
+    import sys
+    ch1 = logging.StreamHandler()
+    ch1.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter('[%(levelname)s %(name)s %(asctime)s] '
+                                  '%(message)s')
+    ch1.setFormatter(formatter)
+
+    logging.getLogger('').setLevel(logging.DEBUG)
+    logging.getLogger('').addHandler(ch1)
+    logger = logging.getLogger("trollcast_server")
+
+    try:
+        serve(sys.argv[1])
+    except KeyboardInterrupt:
+        print "ok, stopping"
+        
+    
+

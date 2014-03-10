@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 Martin Raspaud
+# Copyright (c) 2012, 2014 Martin Raspaud
 
 # Author(s):
 
@@ -30,7 +30,7 @@ import imp
 version = imp.load_source('trollcast.version', 'trollcast/version.py')
 
 
-requirements = ['pyzmq', 'pyorbital', 'posttroll', 'numpy']
+requirements = ['pyzmq', 'pyorbital', 'posttroll', 'numpy', 'pyinotify']
 if sys.version_info < (2, 7):
     requirements.append('argparse')
 
