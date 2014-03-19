@@ -23,11 +23,8 @@
 """New version of the trollcast server
 
 TODO:
- - mirror
- - compute right elevation
  - add lines when local client gets data (if missing)
  - check that mirror server is alive
- - shut down nicely
 """
 
 from ConfigParser import ConfigParser, NoOptionError
@@ -40,8 +37,6 @@ import time
 from datetime import datetime, timedelta
 from posttroll import strp_isoformat
 from fnmatch import fnmatch
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
 from pyinotify import (WatchManager, ProcessEvent, ThreadedNotifier,
                        IN_MODIFY, IN_OPEN, IN_CLOSE_WRITE)
 from urlparse import urlparse
@@ -199,68 +194,70 @@ class HRPT(object):
         
 FORMATS = [CADU, HRPT]
 
+#from watchdog.events import FileSystemEventHandler
+#from watchdog.observers import Observer
 
-class WDFileWatcher(FileSystemEventHandler):
-    """Watch files
-    """
-    def __init__(self, holder, uri):
-        FileSystemEventHandler.__init__(self)
-        self._holder = holder
-        self._uri = uri
-        self._loop = True
-        self._notifier = Observer()
-        self._path, self._pattern = os.path.split(urlparse(self._uri).path)
-        self._notifier.schedule(self, self._path, recursive=False)
-        self._readers = {}
+# class WDFileWatcher(FileSystemEventHandler):
+#     """Watch files
+#     """
+#     def __init__(self, holder, uri):
+#         FileSystemEventHandler.__init__(self)
+#         self._holder = holder
+#         self._uri = uri
+#         self._loop = True
+#         self._notifier = Observer()
+#         self._path, self._pattern = os.path.split(urlparse(self._uri).path)
+#         self._notifier.schedule(self, self._path, recursive=False)
+#         self._readers = {}
 
-    def _reader(self, pathname):
-        """Read the file
-        """
-        # FIXME: the _readers dict has to be cleaned up !!
-        # FIXME: don't open the file each time.
-        try:
-            with open(pathname) as fp_:
-                try:
-                    filereader, position, f_elev = self._readers[pathname]
-                except KeyError:
-                    position = 0
-                    f_elev = None
-                else:
-                    fp_.seek(position)
+#     def _reader(self, pathname):
+#         """Read the file
+#         """
+#         # FIXME: the _readers dict has to be cleaned up !!
+#         # FIXME: don't open the file each time.
+#         try:
+#             with open(pathname) as fp_:
+#                 try:
+#                     filereader, position, f_elev = self._readers[pathname]
+#                 except KeyError:
+#                     position = 0
+#                     f_elev = None
+#                 else:
+#                     fp_.seek(position)
 
-                data = fp_.read()
+#                 data = fp_.read()
 
-                if position == 0:
-                    for filetype in FORMATS:
-                        if filetype.is_it(data):
-                            filereader = filetype()
+#                 if position == 0:
+#                     for filetype in FORMATS:
+#                         if filetype.is_it(data):
+#                             filereader = filetype()
 
-                for elt, offset, f_elev in filereader.read(data, f_elev):
-                    self._readers[pathname] = filereader, position + offset, f_elev
-                    yield elt
-        except IOError, e:
-            logger.warning("Can't read file: " + str(e))
-            return
+#                 for elt, offset, f_elev in filereader.read(data, f_elev):
+#                     self._readers[pathname] = filereader, position + offset, f_elev
+#                     yield elt
+#         except IOError, e:
+#             logger.warning("Can't read file: " + str(e))
+#             return
                 
                 
-    def start(self):
-        """Start the file watcher
-        """
-        self._notifier.start()
+#     def start(self):
+#         """Start the file watcher
+#         """
+#         self._notifier.start()
 
-    def stop(self):
-        """Stop the file watcher
-        """
-        self._notifier.stop()
+#     def stop(self):
+#         """Stop the file watcher
+#         """
+#         self._notifier.stop()
 
-    def on_modified(self, event):
-        path, fname = os.path.split(event.src_path)
-        del path
-        if not fnmatch(fname, self._pattern):
-            return
+#     def on_modified(self, event):
+#         path, fname = os.path.split(event.src_path)
+#         del path
+#         if not fnmatch(fname, self._pattern):
+#             return
         
-        for sat, key, elevation, qual, data in self._reader(event.src_path):
-            self._holder.add(sat, key, elevation, qual, data)
+#         for sat, key, elevation, qual, data in self._reader(event.src_path):
+#             self._holder.add(sat, key, elevation, qual, data)
 
 class FileWatcher(object):
 
@@ -357,7 +354,7 @@ class _EventHandler(ProcessEvent):
         del self._readers[event.pathname]
 
 
-class _MirrorGetter(object):
+class _OldMirrorGetter(object):
     """Gets data from the mirror when needed.
     """
 
@@ -397,7 +394,7 @@ class _MirrorGetter(object):
     def __radd__(self, other):
         return other + str(self)
 
-class MirrorWatcher(Thread):
+class OldMirrorWatcher(Thread):
     """Watches a other server.
     """
 
@@ -424,7 +421,7 @@ class MirrorWatcher(Thread):
                 key = strp_isoformat(message.data["timecode"])
                 elevation = message.data["elevation"]
                 quality = message.data.get("quality", 100)
-                data = _MirrorGetter(self._reqsocket,
+                data = _OldMirrorGetter(self._reqsocket,
                                      sat, key,
                                      self._lock)
                 self._holder.add(sat, key, elevation, quality, data)
@@ -443,7 +440,7 @@ class MirrorWatcher(Thread):
 
 from trollcast.client import SimpleRequester
 
-class _MirrorGetter2(object):
+class _MirrorGetter(object):
     """Gets data from the mirror when needed.
     """
 
@@ -480,7 +477,7 @@ class _MirrorGetter2(object):
     def __radd__(self, other):
         return other + str(self)
 
-class MirrorWatcher2(Thread):
+class MirrorWatcher(Thread):
     """Watches a other server.
     """
 
@@ -506,7 +503,7 @@ class MirrorWatcher2(Thread):
                 key = strp_isoformat(message.data["timecode"])
                 elevation = message.data["elevation"]
                 quality = message.data.get("quality", 100)
-                data = _MirrorGetter2(self._req, sat, key)
+                data = _MirrorGetter(self._req, sat, key)
                 self._holder.add(sat, key, elevation, quality, data)
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
@@ -689,7 +686,7 @@ class RequestManager(Thread):
     """Manage requests.
     """
 
-    def __init__(self, context, holder, port, station):
+    def __init__(self, holder, context, port, station):
         Thread.__init__(self)
 
         self._holder = holder
@@ -703,6 +700,8 @@ class RequestManager(Thread):
         self._poller.register(self._socket, POLLIN)
         
     def send(self, message):
+        """Send a message
+        """
         if message.binary:
             logger.debug("Response: " + " ".join(str(message).split()[:6]))
         else:
@@ -710,9 +709,13 @@ class RequestManager(Thread):
         self._socket.send(str(message))
 
     def pong(self):
+        """Reply to ping
+        """
         return Message(subject, "pong", {"station": self._station})
 
     def scanline(self, message):
+        """Reply to scanline request
+        """
         sat = message.data["satellite"]
         key = strp_isoformat(message.data["utctime"])
         try:
@@ -724,9 +727,15 @@ class RequestManager(Thread):
         return resp
             
     def notice(self, message):
+        """Reply to notice message
+        """
+        del message
         return Message(subject, "ack")
 
     def unknown(self, message):
+        """Reply to any unknown request.
+        """
+        del message
         return Message(subject, "unknown")
         
     def run(self):
@@ -819,11 +828,11 @@ def serve(configfile):
         #watcher = DummyWatcher(holder, 2)
         path = cfg.get("local_reception", "data_dir")
         watcher = None
+
         if not os.path.exists(path):
             logger.warning(path + " doesn't exist, not getting data from files")
         else:
             pattern = cfg.get("local_reception", "file_pattern")
-        
             watcher = FileWatcher(holder, os.path.join(path, pattern))
             watcher.start()
 
@@ -835,13 +844,13 @@ def serve(configfile):
         else:
             pubport_m = cfg.getint(mirror, "pubport")
             reqport_m = cfg.getint(mirror, "reqport")
-            mirror_watcher = MirrorWatcher2(holder, context,
-                                            mirror, pubport_m, reqport_m)
+            mirror_watcher = MirrorWatcher(holder, context,
+                                           mirror, pubport_m, reqport_m)
             mirror_watcher.start()
 
         # request manager
         reqport = cfg.getint(host, "reqport")
-        reqman = RequestManager(context, holder, reqport, station)
+        reqman = RequestManager(holder, context, reqport, station)
         reqman.start()
 
         while True:
