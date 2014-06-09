@@ -605,13 +605,13 @@ class Client(HaveBuffer):
                     if sat not in sat_last_seen:
                         logger.info("Start receiving data for " + sat)
 
-                    sat_last_seen[sat] = datetime.utcnow()
                     logger.debug("Picking line " + " ".join([str(utctime),
                                                          str(senders)]))
                     # choose the highest elevation and quality
                     sender, elevation, quality = max(senders,
                                                      key=(lambda x: (x[2],
                                                                      x[1])))
+                    sat_last_seen[sat] = datetime.utcnow(), evelation
                     logger.debug("requesting " +
                                  " ".join([str(sat), str(utctime),
                                            str(sender), str(elevation)]))
@@ -625,8 +625,11 @@ class Client(HaveBuffer):
                         sat_lines[sat][utctime] = line
                 except Empty:
                     pass
-                for sat, utctime in sat_last_seen.items():
-                    if utctime + CLIENT_TIMEOUT < datetime.utcnow():
+                for sat, (utctime, elevation) in sat_last_seen.items():
+                    if (utctime + CLIENT_TIMEOUT < datetime.utcnow() or
+                        (utctime + timedelta(seconds=3) < datetime.utcnow() and
+                         elevation < 0.5 and
+                         len(sat_lines[sat]) > 100)):
                         # write the lines to file
                         try:
                             first_time = min(sat_lines[sat].keys())
@@ -643,7 +646,7 @@ class Client(HaveBuffer):
                             sat_lines[sat] = {}
                             del sat_last_seen[sat]
         except KeyboardInterrupt:
-            for sat, utctime in sat_last_seen.items():
+            for sat, (utctime, elevation) in sat_last_seen.items():
                 logger.info(sat + ": writing file.")
                 first_time = min(sat_lines[sat].keys())
                 filename = first_time.isoformat() + sat + ".hmf"
