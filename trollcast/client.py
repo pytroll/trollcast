@@ -28,7 +28,7 @@ todo:
 - resets connection to mirror in case of timeout.
 
 """
-from __future__ import with_statement 
+from __future__ import with_statement
 
 import logging
 from ConfigParser import ConfigParser
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # FIXME: this should be configurable depending on the type of data.
 LINES_PER_SECOND = 6
 LINE_SIZE = 11090 * 2
-CLIENT_TIMEOUT = timedelta(seconds=5)
+CLIENT_TIMEOUT = timedelta(seconds=45)
 REQ_TIMEOUT = 1000
 BUFFER_TIME = 2.0
 context = Context()
@@ -90,7 +90,7 @@ class Subscriber(object):
     def recv(self, timeout=None):
         """Receive a message, timeout in seconds.
         """
-        
+
         if timeout:
             timeout *= 1000
 
@@ -111,7 +111,7 @@ class Subscriber(object):
                             yield msg
                 else:
                     yield None
-                
+
     def stop(self):
         """Stop the subscriber
         """
@@ -121,7 +121,7 @@ class Subscriber(object):
                 self._poller.unregister(sub)
                 sub.setsockopt(LINGER, 0)
                 sub.close()
-                
+
 def create_subscriber(cfgfile):
     """Create a new subscriber for all the remote hosts in cfgfile.
     """
@@ -151,11 +151,11 @@ class RTimer(Thread):
         self.kwargs=kwargs
         self.alert_func = function
         self.warning = warning_message
-        
+
     def reset(self):
         self.event.set()
         self.attempt = 0
-        
+
     def alert(self):
         self.attempt += 1
         if self.attempt >= self.tries:
@@ -164,7 +164,7 @@ class RTimer(Thread):
             self.reset()
         else:
             logger.warning(self.warning)
-            
+
     def run(self):
         while self.loop:
             self.event.wait(self.interval)
@@ -176,7 +176,7 @@ class RTimer(Thread):
     def stop(self):
         self.loop = False
         self.event.set()
-                        
+
 
 def reset_subscriber(subscriber, addr):
     logger.warning("Resetting connection to " + addr)
@@ -194,10 +194,10 @@ def create_timers(cfgfile, subscriber):
     addrs.append("tcp://" +
                  cfg.get(localhost, "hostname") + ":" +
                  cfg.get(localhost, "pubport"))
-    for addr in addrs:        
+    for addr in addrs:
         timers[addr] = RTimer(1, addr+" seems to be down, no hearbeat received",
                               reset_subscriber, subscriber, addr)
-    
+
         timers[addr].start()
     return timers
 
@@ -223,7 +223,7 @@ class SimpleRequester(object):
 
     """Base requester class.
     """
-    
+
     def __init__(self, host, port, reqcontext):
         self._context = reqcontext
         self._socket = None
@@ -233,7 +233,7 @@ class SimpleRequester(object):
         self.request_retries = 3
 
         self.connect()
-        
+
     def connect(self):
         """Connect to the server
         """
@@ -299,7 +299,7 @@ class Requester(object):
         self.connect()
         self.blocked = False
         self.lock = Lock()
-        
+
     def reset_connection(self):
         """Reset the socket
         """
@@ -337,7 +337,7 @@ class Requester(object):
         else:
             raise IOError("Timeout from " + str(self._host) +
                           ":" + str(self._port))
-        
+
     def send_and_recv(self, msg, timeout=None):
         """Sending *msg* and returning the reply. This function retries in case
         of timeouts.
@@ -431,7 +431,7 @@ class Requester(object):
                        "file_position": pos})
         response = self.send_and_recv(msg, REQ_TIMEOUT)
         return response
-    
+
 class HaveBuffer(Thread):
     """Listen to incomming have messages.
     """
@@ -465,7 +465,7 @@ class HaveBuffer(Thread):
             pass
         for queue in self._queues:
             queue.put_nowait((sat, utctime, self.scanlines[sat][utctime]))
-        
+
 
     def run(self):
 
@@ -513,7 +513,7 @@ class HaveBuffer(Thread):
                 logger.debug("receive heartbeat from " + str(sender) +
                              ": " + str(message))
                 self._hb[str(sender)].reset()
-                
+
                 for addr, req in self._requesters.items():
                     # can we get the ip adress from the socket somehow ?
                     # because right now the pubaddr and sender are not the same
@@ -530,8 +530,8 @@ class HaveBuffer(Thread):
                                          "ms")
                         break
 
-                
-                
+
+
     def stop(self):
         """Stop buffering.
         """
@@ -601,10 +601,10 @@ class Client(HaveBuffer):
                                                       CLIENT_TIMEOUT.seconds)
                     if sat not in satellites:
                         continue
-                    
+
                     if sat not in sat_last_seen:
                         logger.info("Start receiving data for " + sat)
-                    
+
                     sat_last_seen[sat] = datetime.utcnow()
                     logger.debug("Picking line " + " ".join([str(utctime),
                                                          str(senders)]))
@@ -655,7 +655,7 @@ class Client(HaveBuffer):
                 del sat_last_seen[sat]
             raise
 
-        
+
 
     def order(self, time_slice, satellite, filename):
         """Get all the scanlines for a *satellite* within a *time_slice* and
@@ -673,7 +673,7 @@ class Client(HaveBuffer):
         tsize = (end_time - start_time).seconds * LINES_PER_SECOND * LINE_SIZE
         with open(filename, "wb") as fp_:
             fp_.write("\x00" * (tsize))
-            
+
         # Do the retrieval.
         with open(filename, "r+b") as fp_:
 
@@ -691,7 +691,7 @@ class Client(HaveBuffer):
                    utctime < end_time and
                    utctime not in saved):
                     lines_to_get[utctime] = hosts
-                    
+
             # then, get scanlines from the server
             logger.info("Getting list of existing scanlines from server.")
             for host, req in self._requesters.iteritems():
@@ -705,14 +705,14 @@ class Client(HaveBuffer):
                     logger.warning(e__)
 
 
-                    
+
             # get lines with highest elevation and add them to current scene
             logger.info("Getting old scanlines.")
             for utctime, data, elevation in self.get_lines(satellite,
                                                            lines_to_get):
                 if linepos is None:
                     linepos = compute_line_times(utctime, start_time, end_time)
-                
+
                 time_diff = utctime - start_time
                 time_diff = (time_diff.seconds
                              + time_diff.microseconds / 1000000.0)
@@ -723,7 +723,7 @@ class Client(HaveBuffer):
                                              filename, pos)
                 saved.append(utctime)
                 linepos -= set([utctime])
-            
+
             # then, get the newly arrived scanlines
             logger.info("Getting new scanlines")
             #timethres = datetime.utcnow() + CLIENT_TIMEOUT
@@ -782,7 +782,7 @@ class Client(HaveBuffer):
 
             # shut down
             self.del_queue(queue)
-            
+
     def send_lineinfo_to_server(self, *args, **kwargs):
         """Send information to our own server.
         """
@@ -793,7 +793,7 @@ class Client(HaveBuffer):
         del port
         self._requesters[host].send_lineinfo(*args, **kwargs)
 
-    
+
     def stop(self):
         HaveBuffer.stop(self)
         for req in self._requesters.values():
