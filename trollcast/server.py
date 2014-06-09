@@ -499,10 +499,12 @@ class MirrorWatcher(Thread):
 
     def run(self):
         last_hb = datetime.now()
+        minutes = 2
         while self._loop:
-            if datetime.now() - last_hb > timedelta(minutes=2):
+            if datetime.now() - last_hb > timedelta(minutes=minutes):
                 logger.error("No heartbeat from " + str(self._pubaddress))
                 last_hb = datetime.now()
+                minutes = 1440
             socks = dict(self._poller.poll(2000))
             if (socks and
                 self._subsocket in socks and
@@ -521,6 +523,7 @@ class MirrorWatcher(Thread):
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
                 last_hb = datetime.now()
+                minutes = 2
 
     def stop(self):
         """Stop the watcher
