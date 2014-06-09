@@ -502,6 +502,7 @@ class MirrorWatcher(Thread):
         while self._loop:
             if datetime.now() - last_hb > timedelta(minutes=2):
                 logger.error("No heartbeat from " + str(self._pubaddress))
+                last_hb = datetime.now()
             socks = dict(self._poller.poll(2000))
             if (socks and
                 self._subsocket in socks and
