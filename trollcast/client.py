@@ -611,7 +611,7 @@ class Client(HaveBuffer):
                     sender, elevation, quality = max(senders,
                                                      key=(lambda x: (x[2],
                                                                      x[1])))
-                    sat_last_seen[sat] = datetime.utcnow(), evelation
+                    sat_last_seen[sat] = datetime.utcnow(), elevation
                     logger.debug("requesting " +
                                  " ".join([str(sat), str(utctime),
                                            str(sender), str(elevation)]))
