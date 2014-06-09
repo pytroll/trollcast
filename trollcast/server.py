@@ -493,7 +493,7 @@ class MirrorWatcher(Thread):
         self._subsocket.connect(self._pubaddress)
         self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
         self._poller = Poller()
-        self._poller(self._subsocket, POLLIN)
+        self._poller.register(self._subsocket, POLLIN)
         self._lock = Lock()
         self._loop = True
 
