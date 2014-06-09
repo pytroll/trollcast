@@ -61,10 +61,10 @@ def get_f_elev(satellite):
         """Get the elevation for the given *utctime*.
         """
         return orb.get_observer_look(utctime, *coords)[1]
-    f_elev.satellite = satellite 
+    f_elev.satellite = satellite
     return f_elev
 
-        
+
 class CADU(object):
     """The cadu reader class
     """
@@ -90,7 +90,7 @@ class HRPT(object):
                       ('spare', '>u2', (127, )),
                       ('image_data', '>u2', (2048, 5)),
                       ('aux_sync', '>u2', (100, ))])
-    
+
     hrpt_sync = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224,
                            694, 990, 220, 409, 1010, 403, 654, 105, 62, 867,
                            75, 149, 320, 725, 668, 581, 866, 109, 166, 941,
@@ -166,7 +166,7 @@ class HRPT(object):
                     satellite = self.satellites[((line["id"]["id"] >> 3) & 15)]
                 except KeyError:
                     satellite = "unknown"
-            
+
             if f_elev is None:
                 if satellite != "unknown":
                     f_elev = get_f_elev(satellite)
@@ -176,12 +176,12 @@ class HRPT(object):
             else:
                 elevation = f_elev(utctime)
 
-                
+
             logger.debug("Got line " + utctime.isoformat() + " "
                          + satellite + " "
                          + str(elevation))
 
-            
+
             # TODO:
             # - serve also already present files
             # - timeout and close the file
@@ -190,8 +190,8 @@ class HRPT(object):
                     data[self.line_size * i: self.line_size * (i+1)]),
                    self.line_size * (i+1), f_elev)
 
-        
-        
+
+
 FORMATS = [CADU, HRPT]
 
 #from watchdog.events import FileSystemEventHandler
@@ -238,8 +238,8 @@ FORMATS = [CADU, HRPT]
 #         except IOError, e:
 #             logger.warning("Can't read file: " + str(e))
 #             return
-                
-                
+
+
 #     def start(self):
 #         """Start the file watcher
 #         """
@@ -255,18 +255,18 @@ FORMATS = [CADU, HRPT]
 #         del path
 #         if not fnmatch(fname, self._pattern):
 #             return
-        
+
 #         for sat, key, elevation, qual, data in self._reader(event.src_path):
 #             self._holder.add(sat, key, elevation, qual, data)
 
 class FileWatcher(object):
 
     def __init__(self, holder, uri):
-        
+
         self._wm = WatchManager()
         self._notifier = ThreadedNotifier(self._wm, _EventHandler(holder, uri))
         self._path, self._pattern = os.path.split(urlparse(uri).path)
-    
+
     def start(self):
         """Start the file watcher
         """
@@ -277,7 +277,7 @@ class FileWatcher(object):
         """Stop the file watcher
         """
         self._notifier.stop()
-  
+
 
 class _EventHandler(ProcessEvent):
     """Watch files
@@ -318,19 +318,19 @@ class _EventHandler(ProcessEvent):
         except IOError, err:
             logger.warning("Can't read file: " + str(err))
             return
-                
-                
+
+
     def process_IN_OPEN(self, event):
         """When the file opens.
         """
-        
+
         fname = os.path.basename(event.pathname)
 
         if self._fp is None and fnmatch(fname, self._pattern):
             self._fp = open(event.pathname)
 
         return self._fp is not None
-    
+
     def process_IN_MODIFY(self, event):
         """File has been modified, read it !
         """
@@ -342,7 +342,7 @@ class _EventHandler(ProcessEvent):
 
         if not fnmatch(fname, self._pattern):
             return
-        
+
         for sat, key, elevation, qual, data in self._reader(event.pathname):
             self._holder.add(sat, key, elevation, qual, data)
 
@@ -384,7 +384,7 @@ class _OldMirrorGetter(object):
         self._data = rep.data
         logger.debug("Retrieved scanline from mirror successfully")
         return self._data
-    
+
     def __str__(self):
         return self.get_data()
 
@@ -412,7 +412,7 @@ class OldMirrorWatcher(Thread):
         self._subsocket.connect(self._pubaddress)
         self._lock = Lock()
         self._loop = True
-        
+
     def run(self):
         while self._loop:
             message = Message.decode(self._subsocket.recv())
@@ -467,7 +467,7 @@ class _MirrorGetter(object):
         self._data = rep.data
         logger.debug("Retrieved scanline from mirror successfully")
         return self._data
-    
+
     def __str__(self):
         return self.get_data()
 
@@ -490,14 +490,25 @@ class MirrorWatcher(Thread):
         self._req = SimpleRequester(host, reqport, context)
 
         self._subsocket = context.socket(SUB)
-        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
         self._subsocket.connect(self._pubaddress)
+        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
+        self._poller = Poller()
+        self._poller(self._subsocket, POLLIN)
         self._lock = Lock()
         self._loop = True
-        
+
     def run(self):
+        last_hb = datetime.now()
         while self._loop:
-            message = Message.decode(self._subsocket.recv())
+            if datetime.now() - last_hb > timedelta(minutes=2):
+                logger.error("No heartbeat from " + str(self._pubaddress))
+            socks = dict(self._poller.poll(2000))
+            if (socks and
+                self._subsocket in socks and
+                socks[self._subsocket] == POLLIN):
+                message = Message.decode(self._subsocket.recv())
+            else:
+                continue
             if message.type == "have":
                 sat = message.data["satellite"]
                 key = strp_isoformat(message.data["timecode"])
@@ -508,6 +519,7 @@ class MirrorWatcher(Thread):
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
+                last_hb = datetime.now()
 
     def stop(self):
         """Stop the watcher
@@ -517,7 +529,7 @@ class MirrorWatcher(Thread):
         self._subsocket.setsockopt(LINGER, 0)
         self._subsocket.close()
 
-        
+
 class DummyWatcher(Thread):
     """Dummy watcher for test purposes
     """
@@ -533,7 +545,7 @@ class DummyWatcher(Thread):
             self._holder.add("NOAA 17", datetime.utcnow(),
                              18, 100, "dummy data")
             self._event.wait(self._uri)
-    
+
     def stop(self):
         """Stop adding stuff
         """
@@ -560,24 +572,24 @@ class Cleaner(Thread):
             for key in sorted(satlines):
                 if key < datetime.utcnow() - timedelta(hours=self._delay):
                     self._holder.delete(sat, key)
-            
-                
+
+
 
     def run(self):
         while self._loop:
             self.clean()
             self._event.wait(self._interval)
-    
+
     def stop(self):
         """Stop adding stuff
         """
         self._loop = False
         self._event.set()
-    
+
 class Holder(object):
     """The mighty data holder
     """
-    
+
     def __init__(self, pub, origin):
         self._data = {}
         self._pub = pub
@@ -600,7 +612,7 @@ class Holder(object):
         """return the satellites in store.
         """
         return self._data.keys()
-        
+
     def get(self, sat, key):
         """get the value of *sat* and *key*
         """
@@ -631,7 +643,7 @@ class Holder(object):
         to_send["origin"] = self._origin
         msg = Message(subject, "have", to_send).encode()
         self._pub.send(msg)
-        
+
 class Publisher(object):
     """Publish stuff.
     """
@@ -675,7 +687,7 @@ class Heart(Thread):
             logger.debug("sending heartbeat: " + str(msg))
             self._pub.send(msg)
             self._event.wait(self._interval)
-            
+
     def stop(self):
         """Cardiac arrest
         """
@@ -698,7 +710,7 @@ class RequestManager(Thread):
         self._socket.bind("tcp://*:" + str(self._port))
         self._poller = Poller()
         self._poller.register(self._socket, POLLIN)
-        
+
     def send(self, message):
         """Send a message
         """
@@ -725,7 +737,7 @@ class RequestManager(Thread):
         else:
             resp = Message(subject, "scanline", data, binary=True)
         return resp
-            
+
     def notice(self, message):
         """Reply to notice message
         """
@@ -737,7 +749,7 @@ class RequestManager(Thread):
         """
         del message
         return Message(subject, "unknown")
-        
+
     def run(self):
         while self._loop:
             try:
@@ -787,7 +799,7 @@ def serve(configfile):
     try:
         cfg = ConfigParser()
         cfg.read(configfile)
-        
+
         host = cfg.get("local_reception", "localhost")
 
         # for messages
@@ -866,7 +878,7 @@ def serve(configfile):
             reqman.stop()
         except UnboundLocalError:
             pass
-        
+
         try:
             if mirror_watcher is not None:
                 mirror_watcher.stop()
@@ -896,7 +908,7 @@ def serve(configfile):
             pass
 
 
-        
+
 if __name__ == '__main__':
     import sys
     ch1 = logging.StreamHandler()
@@ -914,6 +926,6 @@ if __name__ == '__main__':
         serve(sys.argv[1])
     except KeyboardInterrupt:
         print "ok, stopping"
-        
-    
+
+
 
