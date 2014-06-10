@@ -567,6 +567,7 @@ class Client(HaveBuffer):
         HaveBuffer.__init__(self, cfgfile)
         self._requesters = create_requesters(cfgfile)
         self.cfgfile = cfgfile
+        self.loop = True
 
     def get_lines(self, satellite, scanline_dict):
         """Retrieve the best (highest elevation) lines of *scanline_dict*.
@@ -583,8 +584,6 @@ class Client(HaveBuffer):
 
             yield utctime, data, elevation
 
-
-
     def get_all(self, satellites):
         """Retrieve all the available scanlines from the stream, and save them.
         """
@@ -595,10 +594,9 @@ class Client(HaveBuffer):
         queue = Queue()
         self.add_queue(queue)
         try:
-            while True:
+            while self.loop:
                 try:
-                    sat, utctime, senders = queue.get(True,
-                                                      CLIENT_TIMEOUT.seconds)
+                    sat, utctime, senders = queue.get(True, 2)
                     if sat not in satellites:
                         continue
 
@@ -799,6 +797,7 @@ class Client(HaveBuffer):
 
     def stop(self):
         HaveBuffer.stop(self)
+        self.loop = False
         for req in self._requesters.values():
             req.stop()
 
