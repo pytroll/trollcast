@@ -26,7 +26,7 @@
 from datetime import datetime
 
 formats = ["scisys"]
-
+satellites = ["NOAA 15", "NOAA 16", "NOAA 18", "NOAA 19"]
 
 def scisys(filename):
     """Read a scisys schedule
@@ -40,9 +40,9 @@ def scisys(filename):
             except IndexError:
                 break
             elts = line[16:].split()
-            sat = line[:16].strip().lower()
+            sat = line[:16].strip()
             rec = elts[8]
-            if rec == "Y":
+            if rec == "Y" and sat in satellites:
                 rise, fall = "".join(elts[1:3]), "".join(elts[3:5])
                 rise = datetime.strptime(rise, "%Y%m%d%H%M%S")
                 fall = datetime.strptime(fall, "%Y%m%d%H%M%S")
