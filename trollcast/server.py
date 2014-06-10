@@ -347,6 +347,8 @@ class _EventHandler(ProcessEvent):
         if not self.process_IN_OPEN(event):
             return
 
+        logger.debug("File modified! %s", event.pathname)
+
         fname = os.path.basename(event.pathname)
 
         if not fnmatch(fname, self._pattern):
