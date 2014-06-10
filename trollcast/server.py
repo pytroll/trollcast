@@ -509,7 +509,8 @@ class MirrorWatcher(Thread):
         self._poller.register(self._subsocket, POLLIN)
         self._lock = Lock()
         self._loop = True
-
+        self._sched = sched
+        
     def run(self):
         last_hb = datetime.now()
         minutes = 2
@@ -535,7 +536,7 @@ class MirrorWatcher(Thread):
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
-                sched._next_pass = message.data["next_pass"]
+                self._sched._next_pass = message.data["next_pass"]
                 last_hb = datetime.now()
                 minutes = 2
 
