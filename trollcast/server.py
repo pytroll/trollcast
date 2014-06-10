@@ -318,7 +318,7 @@ class _EventHandler(ProcessEvent):
             for elt, offset, f_elev in filereader.read(data, f_elev):
                 if current_pass is not None:
                     elt = list(elt)
-                    if elt[0] > current_pass[2] or elt[0] < current_pass[0]:
+                    if elt[1] > current_pass[2] or elt[1] < current_pass[0]:
                         continue
                     elt[1] = current_pass[0]
                 self._readers[pathname] = filereader, position + offset, f_elev
