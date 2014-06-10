@@ -47,8 +47,9 @@ class TestHeart(unittest.TestCase):
     def test_heart(self):
         """Test beating
         """
-        
-        heart = server.Heart(self.pub, address="hej", interval=0.15)
+
+        heart = server.Heart(self.pub, address="hej", interval=0.15,
+                             schedule_reader=MagicMock(name="sched"))
         heart.start()
         time.sleep(0.1)
         heart.stop()
@@ -58,7 +59,7 @@ class TestHeart(unittest.TestCase):
         self.assertTrue(msg.endswith(' v1.01 application/json {"next_pass_time": "unknown", "addr": "hej"}'))
         self.assertEquals(self.pub.send.call_count, 1)
 
-        
+
 class TestPublisher(unittest.TestCase):
 
     def setUp(self):
@@ -73,7 +74,7 @@ class TestPublisher(unittest.TestCase):
         """
 
         port = int(random.uniform(1024, 65536))
-        
+
         pub = server.Publisher(self.context, port)
         self.assertEquals(self.context.socket.call_count, 1)
         self.socket.bind.assert_called_once_with("tcp://*:" + str(port))
@@ -101,7 +102,7 @@ class TestPublisher(unittest.TestCase):
         thr.join()
         self.assertEquals(pub._socket.send.call_args_list[0][0][0], "send 1")
         self.assertEquals(pub._socket.send.call_args_list[1][0][0], "send 2")
-        
+
 class TestHolder(unittest.TestCase):
 
     def setUp(self):
@@ -140,8 +141,8 @@ class TestHolder(unittest.TestCase):
 
         self.assertRaises(KeyError, self.holder.get, *args[:2])
 
-    
-        
+
+
 
 # CADU
 # HRPT
@@ -156,12 +157,12 @@ class TestRequestManager(unittest.TestCase):
         self.context = MagicMock()
         self.port = MagicMock()
         self.station = MagicMock()
-        
+
         self.reqman = server.RequestManager(self.holder,
                                             self.context,
                                             self.port,
                                             self.station)
-        
+
 
     def test_start_stop(self):
         """Test start and stop of ReqMan
@@ -183,7 +184,7 @@ class TestRequestManager(unittest.TestCase):
         """
         self.reqman.notice(MagicMock())
         server.Message.assert_called_with(server.subject, "ack")
-                       
+
     def test_unknown(self):
         """Test unknown
         """
@@ -202,7 +203,7 @@ class TestRequestManager(unittest.TestCase):
         resp = self.reqman.scanline(MagicMock())
         server.Message.assert_called_with(server.subject, "missing")
         self.holder.get_data.side_effect = None
-        
+
     def test_send(self):
         """Test sending response.
         """
@@ -219,7 +220,7 @@ class TestRequestManager(unittest.TestCase):
 
 
         cnt = [0]
-        
+
         def side_effect(timeout):
             del timeout
             time.sleep(0.1)
@@ -242,7 +243,7 @@ class TestRequestManager(unittest.TestCase):
         unknown = MagicMock()
 
         msgs = [ping, req, notice, unknown]
-        
+
         def msg(*args, **kwargs):
             if "rawstr" in kwargs:
                 return msgs[cnt[0] % len(msgs)]
@@ -250,7 +251,7 @@ class TestRequestManager(unittest.TestCase):
                 return MagicMock()
 
         server.Message.side_effect = msg
-        
+
         self.reqman.pong = MagicMock()
         self.reqman.notice = MagicMock()
         self.reqman.scanline = MagicMock()
@@ -270,6 +271,7 @@ class TestRequestManager(unittest.TestCase):
 class TestServe(unittest.TestCase):
 
     @patch.object(time, 'sleep')
+    @patch.object(server, 'ScheduleReader')
     @patch.object(server, 'RequestManager')
     @patch.object(server, 'MirrorWatcher')
     @patch.object(server, 'FileWatcher')
@@ -278,14 +280,16 @@ class TestServe(unittest.TestCase):
     @patch.object(server, 'Heart')
     @patch.object(server, 'Publisher')
     def test_serve_mirror(self, Publisher, Heart, Holder, Cleaner, FileWatcher,
-                          MirrorWatcher, RequestManager, sleep):
+                          MirrorWatcher, RequestManager, ScheduleReader, sleep):
         """Test serving from a mirror
         """
         server.ConfigParser.return_value.read.reset_mock()
         server.Context.return_value.term.reset_mock()
         server.time.sleep = MagicMock(side_effect=KeyboardInterrupt())
         mirrorcfg = ["this_computer", "neverwhere", "360 180 100",
-                     "/some/where/", "amore_mio",
+                     "/some/where/", 
+                     server.NoOptionError("boom"),
+                     server.NoOptionError("boom"), "amore_mio",
                      "/under/the/rainbow/", "bluebird"]
         server.ConfigParser.return_value.get = MagicMock(side_effect=mirrorcfg)
         mirrorcfg = [666, 667, 668, 669]
@@ -293,16 +297,17 @@ class TestServe(unittest.TestCase):
         server.serve("test_config.cfg")
 
         # Config reading
-        
+
         server.ConfigParser.return_value.read.assert_called_once_with("test_config.cfg")
 
         # publisher
         Publisher.assert_called_once_with(server.Context.return_value, 666)
-        
+
         # heart
         Heart.assert_called_once_with(Publisher.return_value,
                                       "amore_mio:666",
-                                      30)
+                                      30,
+                                      ScheduleReader.return_value)
 
         # holder
         Holder.assert_called_once_with(Publisher.return_value,
@@ -313,16 +318,17 @@ class TestServe(unittest.TestCase):
 
         # watcher
         self.assertEquals(FileWatcher.call_count, 0)
-        
+
         MirrorWatcher.assert_called_once_with(Holder.return_value,
                                               server.Context.return_value,
-                                              "bluebird", 667, 668)
+                                              "bluebird", 667, 668,
+                                              ScheduleReader.return_value)
         # request manager
 
         RequestManager.assert_called_once_with(Holder.return_value,
                                                server.Context.return_value,
                                                669, "neverwhere")
-        
+
         # closing apps...
         for app in [RequestManager.return_value,
                     MirrorWatcher.return_value,
@@ -333,6 +339,7 @@ class TestServe(unittest.TestCase):
         self.assertEquals(server.Context.return_value.term.call_count, 1)
 
     @patch.object(time, 'sleep')
+    @patch.object(server, 'ScheduleReader')
     @patch.object(server, 'RequestManager')
     @patch.object(server, 'MirrorWatcher')
     @patch.object(server, 'FileWatcher')
@@ -341,7 +348,7 @@ class TestServe(unittest.TestCase):
     @patch.object(server, 'Heart')
     @patch.object(server, 'Publisher')
     def test_serve_file(self, Publisher, Heart, Holder, Cleaner, FileWatcher,
-                          MirrorWatcher, RequestManager, sleep):
+                          MirrorWatcher, RequestManager, ScheduleReader, sleep):
         """Test serving from a file
         """
         server.ConfigParser.return_value.read.reset_mock()
@@ -349,8 +356,10 @@ class TestServe(unittest.TestCase):
         server.time.sleep = MagicMock(side_effect=KeyboardInterrupt())
         server.NoOptionError = Exception
         filecfg = ["this_computer", "neverwhere", "360 180 100",
-                     "/some/where/", "amore_mio",
-                     "/tmp", "*.hmf", server.NoOptionError("boom")]
+                   "/some/where/",  "/tmp/sched.txt",
+                   "schedformat", "amore_mio",
+                   "/tmp", "*.hmf",
+                   server.NoOptionError("boom")]
         server.ConfigParser.return_value.get = MagicMock(side_effect=filecfg)
         filecfg = [666, 667, 668, 669]
         server.ConfigParser.return_value.getint = MagicMock(side_effect=filecfg)
@@ -361,11 +370,12 @@ class TestServe(unittest.TestCase):
 
         # publisher
         Publisher.assert_called_once_with(server.Context.return_value, 666)
-        
+
         # heart
         Heart.assert_called_once_with(Publisher.return_value,
                                       "amore_mio:666",
-                                      30)
+                                      30,
+                                      ScheduleReader.return_value)
 
         # holder
         Holder.assert_called_once_with(Publisher.return_value,
@@ -376,15 +386,16 @@ class TestServe(unittest.TestCase):
 
         # watcher
         self.assertEquals(MirrorWatcher.call_count, 0)
-        
+
         FileWatcher.assert_called_once_with(Holder.return_value,
-                                            "/tmp/*.hmf")
+                                            "/tmp/*.hmf",
+                                            ScheduleReader.return_value)
         # request manager
 
         RequestManager.assert_called_once_with(Holder.return_value,
                                                server.Context.return_value,
                                                667, "neverwhere")
-        
+
         # closing apps...
         for app in [RequestManager.return_value,
                     FileWatcher.return_value,
@@ -394,7 +405,7 @@ class TestServe(unittest.TestCase):
             self.assertEquals(app.stop.call_count, 1)
         self.assertEquals(server.Context.return_value.term.call_count, 1)
         server.NoOptionError = MagicMock()
-        
+
 def suite():
     """The suite for test_server
     """
@@ -405,5 +416,5 @@ def suite():
     mysuite.addTest(loader.loadTestsFromTestCase(TestHolder))
     mysuite.addTest(loader.loadTestsFromTestCase(TestRequestManager))
     mysuite.addTest(loader.loadTestsFromTestCase(TestServe))
-    
+
     return mysuite

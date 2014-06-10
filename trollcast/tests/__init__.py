@@ -23,7 +23,7 @@
 """The tests package.
 """
 
-from trollcast.tests import test_server
+from trollcast.tests import test_server, test_client
 import unittest
 
 def suite():
@@ -31,7 +31,8 @@ def suite():
     """
     mysuite = unittest.TestSuite()
     mysuite.addTests(test_server.suite())
+    mysuite.addTests(test_client.suite())
 
-    
+
     return mysuite
 
