@@ -319,6 +319,8 @@ class _EventHandler(ProcessEvent):
                 if current_pass is not None:
                     elt = list(elt)
                     if elt[1] > current_pass[2] or elt[1] < current_pass[0]:
+                        logger.debug("line %s doesn't match current pass %s",
+                                     str(elt[:2]), str(current_pass))
                         continue
                     elt[0] = current_pass[0]
                 yield elt
@@ -700,7 +702,10 @@ class ScheduleReader(object):
     def get_next_pass(self):
         """Get the next pass from the schedule
         """
-        fun = getattr(schedules, self._fileformat)
+        try:
+            fun = getattr(schedules, self._fileformat)
+        except TypeError:
+            return None
         logger.debug("using %s", str(fun))
         now = datetime.utcnow()
         for overpass in fun(self._filename):
