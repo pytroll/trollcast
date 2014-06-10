@@ -307,7 +307,6 @@ class _EventHandler(ProcessEvent):
                 f_elev = None
             else:
                 self._fp.seek(position)
-
             data = self._fp.read()
 
             if position == 0:
@@ -316,12 +315,12 @@ class _EventHandler(ProcessEvent):
                         filereader = filetype()
 
             for elt, offset, f_elev in filereader.read(data, f_elev):
+                self._readers[pathname] = filereader, position + offset, f_elev
                 if current_pass is not None:
                     elt = list(elt)
                     if elt[1] > current_pass[2] or elt[1] < current_pass[0]:
                         continue
-                    elt[1] = current_pass[0]
-                self._readers[pathname] = filereader, position + offset, f_elev
+                    elt[0] = current_pass[0]
                 yield elt
         except IOError, err:
             logger.warning("Can't read file: " + str(err))
