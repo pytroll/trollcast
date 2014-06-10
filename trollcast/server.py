@@ -344,10 +344,10 @@ class _EventHandler(ProcessEvent):
         """File has been modified, read it !
         """
 
+        logger.debug("File modified! %s", event.pathname)
+
         if not self.process_IN_OPEN(event):
             return
-
-        logger.debug("File modified! %s", event.pathname)
 
         fname = os.path.basename(event.pathname)
 
