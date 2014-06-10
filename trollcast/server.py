@@ -43,6 +43,7 @@ from urlparse import urlparse
 import os
 import numpy as np
 from glob import glob
+from trollcast import schedules
 
 logger = logging.getLogger(__name__)
 
@@ -282,10 +283,12 @@ class FileWatcher(object):
 class _EventHandler(ProcessEvent):
     """Watch files
     """
-    def __init__(self, holder, uri):
+    def __init__(self, holder, uri, schedule_reader):
         ProcessEvent.__init__(self)
         self._holder = holder
         self._uri = uri
+        self._current_pass = None
+        self._schedule_reader = schedule_reader
         self._loop = True
 
         self._path, self._pattern = os.path.split(urlparse(self._uri).path)
@@ -293,7 +296,7 @@ class _EventHandler(ProcessEvent):
         self._readers = {}
         self._fp = None
 
-    def _reader(self, pathname):
+    def _reader(self, pathname, current_pass):
         """Read the file
         """
         try:
@@ -313,12 +316,16 @@ class _EventHandler(ProcessEvent):
                         filereader = filetype()
 
             for elt, offset, f_elev in filereader.read(data, f_elev):
+                if current_pass is not None:
+                    elt = list(elt)
+                    if elt[0] > current_pass[2] or elt[0] < current_pass[0]:
+                        continue
+                    elt[1] = current_pass[0]
                 self._readers[pathname] = filereader, position + offset, f_elev
                 yield elt
         except IOError, err:
             logger.warning("Can't read file: " + str(err))
             return
-
 
     def process_IN_OPEN(self, event):
         """When the file opens.
@@ -328,6 +335,8 @@ class _EventHandler(ProcessEvent):
 
         if self._fp is None and fnmatch(fname, self._pattern):
             self._fp = open(event.pathname)
+            self._current_pass = self._schedule_reader.next_pass
+            self._schedule_reader.get_next_pass()
 
         return self._fp is not None
 
@@ -343,7 +352,8 @@ class _EventHandler(ProcessEvent):
         if not fnmatch(fname, self._pattern):
             return
 
-        for sat, key, elevation, qual, data in self._reader(event.pathname):
+        for sat, key, elevation, qual, data in self._reader(event.pathname,
+                                                            self._current_pass):
             self._holder.add(sat, key, elevation, qual, data)
 
     def process_IN_CLOSE_WRITE(self, event):
@@ -481,7 +491,7 @@ class MirrorWatcher(Thread):
     """Watches a other server.
     """
 
-    def __init__(self, holder, context, host, pubport, reqport):
+    def __init__(self, holder, context, host, pubport, reqport, sched):
         Thread.__init__(self)
         self._holder = holder
         self._pubaddress = "tcp://" + host + ":" + str(pubport)
@@ -522,6 +532,7 @@ class MirrorWatcher(Thread):
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
+                sched._next_pass = message.data["next_pass"]
                 last_hb = datetime.now()
                 minutes = 2
 
@@ -670,22 +681,49 @@ class Publisher(object):
             self._socket.setsockopt(LINGER, 0)
             self._socket.close()
 
+class ScheduleReader(object):
+    """Reads and handles a schedule
+    """
+
+    def __init__(self, filename, fileformat):
+        """
+
+        Arguments:
+        - `filename`: schedule filename
+        - `fileformat`: schedule format
+        """
+        self._filename = filename
+        self._fileformat = fileformat
+        self._next_pass = None
+
+    def get_next_pass(self):
+        """Get the next pass from the schedule
+        """
+        fun = getattr(schedules, self._fileformat)
+        logger.debug("using %s", str(fun))
+        now = datetime.utcnow()
+        for overpass in fun(self._filename):
+            if overpass[0] > now:
+                self._next_pass = overpass
+                return overpass
+
 class Heart(Thread):
     """Send heartbeats once in a while.
     """
 
-    def __init__(self, pub, address, interval):
+    def __init__(self, pub, address, interval, schedule_reader):
         Thread.__init__(self)
         self._loop = True
         self._event = Event()
         self._address = address
         self._pub = pub
+        self._schedule_reader = schedule_reader
         self._interval = interval
 
     def run(self):
         while self._loop:
             to_send = {}
-            to_send["next_pass_time"] = "unknown"
+            to_send["next_pass"] = str(self._schedule_reader._next_pass)
             to_send["addr"] = self._address
             msg =  Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
@@ -826,10 +864,19 @@ def serve(configfile):
         pubport = cfg.getint(host, "pubport")
         pub = Publisher(context, pubport)
 
+        # schedule reader
+        try:
+            sched = ScheduleReader(cfg.get("local_reception", "schedule_file"),
+                                   cfg.get("local_reception", "schedule_format"))
+            sched.get_next_pass()
+        except NoOptionError:
+            logger.warning("No schedule file given")
+            sched = ScheduleReader(None, None)
+
         # heart
         hostname = cfg.get(host, "hostname")
         pubaddress = hostname + ":" + str(pubport)
-        heart = Heart(pub, pubaddress, 30)
+        heart = Heart(pub, pubaddress, 30, sched)
         heart.start()
 
         # holder
@@ -861,7 +908,8 @@ def serve(configfile):
             pubport_m = cfg.getint(mirror, "pubport")
             reqport_m = cfg.getint(mirror, "reqport")
             mirror_watcher = MirrorWatcher(holder, context,
-                                           mirror, pubport_m, reqport_m)
+                                           mirror, pubport_m, reqport_m,
+                                           sched)
             mirror_watcher.start()
 
         # request manager
