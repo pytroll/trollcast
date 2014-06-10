@@ -262,10 +262,10 @@ FORMATS = [CADU, HRPT]
 
 class FileWatcher(object):
 
-    def __init__(self, holder, uri):
+    def __init__(self, holder, uri, schedule_reader):
 
         self._wm = WatchManager()
-        self._notifier = ThreadedNotifier(self._wm, _EventHandler(holder, uri))
+        self._notifier = ThreadedNotifier(self._wm, _EventHandler(holder, uri, schedule_reader))
         self._path, self._pattern = os.path.split(urlparse(uri).path)
 
     def start(self):
@@ -896,7 +896,7 @@ def serve(configfile):
             logger.warning(path + " doesn't exist, not getting data from files")
         else:
             pattern = cfg.get("local_reception", "file_pattern")
-            watcher = FileWatcher(holder, os.path.join(path, pattern))
+            watcher = FileWatcher(holder, os.path.join(path, pattern), sched)
             watcher.start()
 
         mirror_watcher = None
