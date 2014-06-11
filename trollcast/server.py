@@ -29,7 +29,7 @@ TODO:
 
 from ConfigParser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
-from threading import Thread, Event, Lock
+from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
 from pyorbital.orbital import Orbital
 import logging
@@ -295,6 +295,28 @@ class _EventHandler(ProcessEvent):
 
         self._readers = {}
         self._fp = None
+        self._receiving = False
+        self._timer = None
+        if schedule_reader._next_pass:
+            next_pass_in = schedule_reader._next_pass[0] - datetime.utcnow()
+            if next_pass_in > 0:
+                self._timer = Timer(next_pass_in.seconds + 5,
+                                    logger.error,
+                                    ["Reception expected but not started"])
+                self._timer.start()
+
+    def start_receiving(self):
+        self._receiving = True
+        self._timer.cancel()
+
+    def stop_receiving(self):
+        self._receiving = False
+        if schedule_reader._next_pass:
+            next_pass_in = schedule_reader._next_pass[0] - datetime.utcnow()
+            self._timer = Timer(next_pass_in.seconds + 5,
+                                logger.error,
+                                ["Reception expected but not started"])
+            self._timer.start()
 
     def _reader(self, pathname, current_pass):
         """Read the file
@@ -338,6 +360,7 @@ class _EventHandler(ProcessEvent):
             self._fp = open(event.pathname)
             self._current_pass = self._schedule_reader._next_pass
 
+        self.start_receiving()
         return self._fp is not None
 
     def process_IN_MODIFY(self, event):
@@ -356,6 +379,8 @@ class _EventHandler(ProcessEvent):
         if not fnmatch(fname, self._pattern):
             return
 
+        self.start_receiving()
+
         for sat, key, elevation, qual, data in self._reader(event.pathname,
                                                             self._current_pass):
             self._holder.add(sat, key, elevation, qual, data)
@@ -366,6 +391,7 @@ class _EventHandler(ProcessEvent):
         self._fp.close()
         self._fp = None
         self._schedule_reader.get_next_pass()
+        self.stop_receiving()
         del self._readers[event.pathname]
 
 
@@ -512,7 +538,7 @@ class MirrorWatcher(Thread):
         self._lock = Lock()
         self._loop = True
         self._sched = sched
-        
+
     def run(self):
         last_hb = datetime.now()
         minutes = 2
