@@ -732,7 +732,8 @@ class Heart(Thread):
     def run(self):
         while self._loop:
             to_send = {}
-            to_send["next_pass"] = str(self._schedule_reader._next_pass)
+            to_send["next_pass"] = (self._schedule_reader.get_next_pass() or
+                                    str(self._schedule_reader._next_pass))
             to_send["addr"] = self._address
             msg =  Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
