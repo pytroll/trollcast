@@ -337,7 +337,6 @@ class _EventHandler(ProcessEvent):
         if self._fp is None and fnmatch(fname, self._pattern):
             self._fp = open(event.pathname)
             self._current_pass = self._schedule_reader._next_pass
-            self._schedule_reader.get_next_pass()
 
         return self._fp is not None
 
@@ -349,6 +348,8 @@ class _EventHandler(ProcessEvent):
 
         if not self.process_IN_OPEN(event):
             return
+
+        self._current_pass = self._schedule_reader._next_pass
 
         fname = os.path.basename(event.pathname)
 
@@ -364,6 +365,7 @@ class _EventHandler(ProcessEvent):
         """
         self._fp.close()
         self._fp = None
+        self._schedule_reader.get_next_pass()
         del self._readers[event.pathname]
 
 
