@@ -299,7 +299,7 @@ class _EventHandler(ProcessEvent):
         self._timer = None
         if schedule_reader._next_pass:
             next_pass_in = schedule_reader._next_pass[0] - datetime.utcnow()
-            if next_pass_in > 0:
+            if next_pass_in.seconds > 0:
                 self._timer = Timer(next_pass_in.seconds + 5,
                                     logger.error,
                                     ["Reception expected but not started"])
