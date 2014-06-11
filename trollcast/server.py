@@ -322,7 +322,7 @@ class _EventHandler(ProcessEvent):
                         logger.debug("line %s doesn't match current pass %s",
                                      str(elt[:2]), str(current_pass))
                         continue
-                    elt[0] = current_pass[0]
+                    elt[0] = current_pass[1]
                 yield elt
         except IOError, err:
             logger.warning("Can't read file: " + str(err))
