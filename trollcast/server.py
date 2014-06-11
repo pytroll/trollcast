@@ -712,7 +712,7 @@ class ScheduleReader(object):
         logger.debug("using %s", str(fun))
         now = datetime.utcnow()
         for overpass in fun(self._filename):
-            if overpass[0] > now:
+            if overpass[2] > now:
                 self._next_pass = overpass
                 return overpass
 
