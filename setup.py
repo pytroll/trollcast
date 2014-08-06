@@ -30,7 +30,8 @@ import imp
 version = imp.load_source('trollcast.version', 'trollcast/version.py')
 
 
-requirements = ['pyzmq', 'pyorbital', 'posttroll', 'numpy', 'pyinotify']
+requirements = ['pyzmq', 'pyorbital', 'posttroll',
+                'numpy', 'pyinotify', 'trollsift']
 if sys.version_info < (2, 7):
     requirements.append('argparse')
 
@@ -41,8 +42,8 @@ setup(name="trollcast",
       author='The pytroll team',
       author_email='martin.raspaud@smhi.se',
       packages=['trollcast'],
-      scripts = ['bin/trollcast_client',
-                 'bin/trollcast_server'],
+      scripts=['bin/trollcast_client',
+               'bin/trollcast_server'],
       zip_safe=False,
       license="GPLv3",
       install_requires=requirements,
@@ -54,7 +55,7 @@ setup(name="trollcast",
           'Intended Audience :: Science/Research',
           'Topic :: Scientific/Engineering',
           'Topic :: Communications'
-          ],
+      ],
       #extras_require={ 'daemon': ['python-daemon'],}
       test_suite='trollcast.tests.suite',
       test_requires=['mock']

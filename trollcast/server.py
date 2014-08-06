@@ -44,8 +44,10 @@ import os
 import numpy as np
 from glob import glob
 from trollcast import schedules
+from trollsift.parser import globify, parse
 
 logger = logging.getLogger(__name__)
+
 
 def get_f_elev(satellite):
     """Get the elevation function for a given satellite
@@ -58,6 +60,7 @@ def get_f_elev(satellite):
         tle_file = None
 
     orb = Orbital(satellite.upper(), tle_file)
+
     def f_elev(utctime):
         """Get the elevation for the given *utctime*.
         """
@@ -67,23 +70,26 @@ def get_f_elev(satellite):
 
 
 class CADU(object):
+
     """The cadu reader class
     """
     @staticmethod
     def is_it(data):
         return False
 
+
 class HRPT(object):
+
     """The hrpt reader class
     """
     dtype = np.dtype([('frame_sync', '>u2', (6, )),
                       ('id', [('id', '>u2'),
                               ('spare', '>u2')]),
-                              ('timecode', '>u2', (4, )),
+                      ('timecode', '>u2', (4, )),
                       ('telemetry', [("ramp_calibration", '>u2', (5, )),
                                      ("PRT", '>u2', (3, )),
                                      ("ch3_patch_temp", '>u2'),
-                                     ("spare", '>u2'),]),
+                                     ("spare", '>u2'), ]),
                       ('back_scan', '>u2', (10, 3)),
                       ('space_data', '>u2', (10, 5)),
                       ('sync', '>u2'),
@@ -92,16 +98,16 @@ class HRPT(object):
                       ('image_data', '>u2', (2048, 5)),
                       ('aux_sync', '>u2', (100, ))])
 
-    hrpt_sync = np.array([ 994, 1011, 437, 701, 644, 277, 452, 467, 833, 224,
-                           694, 990, 220, 409, 1010, 403, 654, 105, 62, 867,
-                           75, 149, 320, 725, 668, 581, 866, 109, 166, 941,
-                           1022, 59, 989, 182, 461, 197, 751, 359, 704, 66,
-                           387, 238, 850, 746, 473, 573, 282, 6, 212, 169, 623,
-                           761, 979, 338, 249, 448, 331, 911, 853, 536, 323,
-                           703, 712, 370, 30, 900, 527, 977, 286, 158, 26, 796,
-                           705, 100, 432, 515, 633, 77, 65, 489, 186, 101, 406,
-                           560, 148, 358, 742, 113, 878, 453, 501, 882, 525,
-                           925, 377, 324, 589, 594, 496, 972], dtype=np.uint16)
+    hrpt_sync = np.array([994, 1011, 437, 701, 644, 277, 452, 467, 833, 224,
+                          694, 990, 220, 409, 1010, 403, 654, 105, 62, 867,
+                          75, 149, 320, 725, 668, 581, 866, 109, 166, 941,
+                          1022, 59, 989, 182, 461, 197, 751, 359, 704, 66,
+                          387, 238, 850, 746, 473, 573, 282, 6, 212, 169, 623,
+                          761, 979, 338, 249, 448, 331, 911, 853, 536, 323,
+                          703, 712, 370, 30, 900, 527, 977, 286, 158, 26, 796,
+                          705, 100, 432, 515, 633, 77, 65, 489, 186, 101, 406,
+                          560, 148, 358, 742, 113, 878, 453, 501, 882, 525,
+                          925, 377, 324, 589, 594, 496, 972], dtype=np.uint16)
 
     hrpt_sync_start = np.array([644, 367, 860, 413, 527, 149], dtype=np.uint16)
 
@@ -129,7 +135,7 @@ class HRPT(object):
         msecs *= 1024
         word = tc_array[3]
         msecs += word & 1023
-        return timedelta(days=int(day/2 - 1), milliseconds=int(msecs))
+        return timedelta(days=int(day / 2 - 1), milliseconds=int(msecs))
 
     def read(self, data, f_elev=None):
         """Read hrpt data.
@@ -139,7 +145,7 @@ class HRPT(object):
         year = now.year
 
         for i, line in enumerate(np.fromstring(data, dtype=self.dtype,
-                                               count=len(data)/self.line_size)):
+                                               count=len(data) / self.line_size)):
 
             days = self.timecode(line["timecode"])
             utctime = datetime(year, 1, 1) + days
@@ -149,7 +155,7 @@ class HRPT(object):
 
             qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
                     np.sum(line['frame_sync'] == self.hrpt_sync_start))
-            qual = (100*qual)/106
+            qual = (100 * qual) / 106
             logger.info("Quality " + str(qual))
 
             if qual != 100:
@@ -157,8 +163,8 @@ class HRPT(object):
                 if f_elev is None:
                     satellite = "unknown"
                     yield ((satellite, utctime, None, qual,
-                            data[self.line_size * i: self.line_size * (i+1)]),
-                           self.line_size * (i+1), f_elev)
+                            data[self.line_size * i: self.line_size * (i + 1)]),
+                           self.line_size * (i + 1), f_elev)
                     continue
                 else:
                     satellite = f_elev.satellite
@@ -177,20 +183,17 @@ class HRPT(object):
             else:
                 elevation = f_elev(utctime)
 
-
             logger.debug("Got line " + utctime.isoformat() + " "
                          + satellite + " "
                          + str(elevation))
-
 
             # TODO:
             # - serve also already present files
             # - timeout and close the file
 
             yield ((satellite, utctime, elevation, qual,
-                    data[self.line_size * i: self.line_size * (i+1)]),
-                   self.line_size * (i+1), f_elev)
-
+                    data[self.line_size * i: self.line_size * (i + 1)]),
+                   self.line_size * (i + 1), f_elev)
 
 
 FORMATS = [CADU, HRPT]
@@ -214,8 +217,8 @@ FORMATS = [CADU, HRPT]
 #     def _reader(self, pathname):
 #         """Read the file
 #         """
-#         # FIXME: the _readers dict has to be cleaned up !!
-#         # FIXME: don't open the file each time.
+# FIXME: the _readers dict has to be cleaned up !!
+# FIXME: don't open the file each time.
 #         try:
 #             with open(pathname) as fp_:
 #                 try:
@@ -265,7 +268,9 @@ class FileWatcher(object):
     def __init__(self, holder, uri, schedule_reader):
 
         self._wm = WatchManager()
-        self._notifier = ThreadedNotifier(self._wm, _EventHandler(holder, uri, schedule_reader))
+        self._notifier = ThreadedNotifier(self._wm,
+                                          _EventHandler(holder, uri,
+                                                        schedule_reader))
         self._path, self._pattern = os.path.split(urlparse(uri).path)
 
     def start(self):
@@ -281,8 +286,10 @@ class FileWatcher(object):
 
 
 class _EventHandler(ProcessEvent):
+
     """Watch files
     """
+
     def __init__(self, holder, uri, schedule_reader):
         ProcessEvent.__init__(self)
         self._holder = holder
@@ -297,8 +304,11 @@ class _EventHandler(ProcessEvent):
         self._fp = None
         self._receiving = False
         self._timer = None
-        if schedule_reader._next_pass:
-            next_pass_in = schedule_reader._next_pass[0] - datetime.utcnow()
+        self.sat = None
+
+        if self._schedule_reader._next_pass:
+            next_pass_in = (self._schedule_reader._next_pass[0]
+                            - datetime.utcnow())
             if next_pass_in.seconds > 0:
                 self._timer = Timer(next_pass_in.seconds + 5,
                                     logger.error,
@@ -311,8 +321,9 @@ class _EventHandler(ProcessEvent):
 
     def stop_receiving(self):
         self._receiving = False
-        if schedule_reader._next_pass:
-            next_pass_in = schedule_reader._next_pass[0] - datetime.utcnow()
+        if self._schedule_reader._next_pass:
+            next_pass_in = (self._schedule_reader._next_pass[0]
+                            - datetime.utcnow())
             self._timer = Timer(next_pass_in.seconds + 5,
                                 logger.error,
                                 ["Reception expected but not started"])
@@ -338,12 +349,23 @@ class _EventHandler(ProcessEvent):
 
             for elt, offset, f_elev in filereader.read(data, f_elev):
                 self._readers[pathname] = filereader, position + offset, f_elev
-                if current_pass is not None:
+                if self.sat is not None:
+                    elt = list(elt)
+                    if elt[0] != self.sat:
+                        logger.debug("Satellite id scrambled, "
+                                     "lowering quality score.")
+                        elt[3] -= 1
+                    elt[0] = self.sat
+                elif current_pass is not None:
                     elt = list(elt)
                     if elt[1] > current_pass[2] or elt[1] < current_pass[0]:
                         logger.debug("line %s doesn't match current pass %s",
                                      str(elt[:2]), str(current_pass))
                         continue
+                    if elt[0] != current_pass[1]:
+                        logger.debug("Satellite id scrambled, "
+                                     "lowering quality score.")
+                        elt[3] -= 1
                     elt[0] = current_pass[1]
                 yield elt
         except IOError, err:
@@ -356,9 +378,15 @@ class _EventHandler(ProcessEvent):
 
         fname = os.path.basename(event.pathname)
 
-        if self._fp is None and fnmatch(fname, self._pattern):
+        if self._fp is None and fnmatch(fname, globify(self._pattern)):
             self._fp = open(event.pathname)
             self._current_pass = self._schedule_reader._next_pass
+            info = parse(self._pattern, fname)
+            try:
+                self.sat = " ".join(info["platform"], info["number"])
+            except KeyError:
+                logger.info("Could not retrieve satellite name from filename")
+                pass
 
         self.start_receiving()
         return self._fp is not None
@@ -396,6 +424,7 @@ class _EventHandler(ProcessEvent):
 
 
 class _OldMirrorGetter(object):
+
     """Gets data from the mirror when needed.
     """
 
@@ -435,7 +464,9 @@ class _OldMirrorGetter(object):
     def __radd__(self, other):
         return other + str(self)
 
+
 class OldMirrorWatcher(Thread):
+
     """Watches a other server.
     """
 
@@ -463,8 +494,8 @@ class OldMirrorWatcher(Thread):
                 elevation = message.data["elevation"]
                 quality = message.data.get("quality", 100)
                 data = _OldMirrorGetter(self._reqsocket,
-                                     sat, key,
-                                     self._lock)
+                                        sat, key,
+                                        self._lock)
                 self._holder.add(sat, key, elevation, quality, data)
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
@@ -481,7 +512,9 @@ class OldMirrorWatcher(Thread):
 
 from trollcast.client import SimpleRequester
 
+
 class _MirrorGetter(object):
+
     """Gets data from the mirror when needed.
     """
 
@@ -518,7 +551,9 @@ class _MirrorGetter(object):
     def __radd__(self, other):
         return other + str(self)
 
+
 class MirrorWatcher(Thread):
+
     """Watches a other server.
     """
 
@@ -549,8 +584,8 @@ class MirrorWatcher(Thread):
                 minutes = 1440
             socks = dict(self._poller.poll(2000))
             if (socks and
-                self._subsocket in socks and
-                socks[self._subsocket] == POLLIN):
+                    self._subsocket in socks and
+                    socks[self._subsocket] == POLLIN):
                 message = Message.decode(self._subsocket.recv())
             else:
                 continue
@@ -578,8 +613,10 @@ class MirrorWatcher(Thread):
 
 
 class DummyWatcher(Thread):
+
     """Dummy watcher for test purposes
     """
+
     def __init__(self, holder, uri):
         Thread.__init__(self)
         self._holder = holder
@@ -599,9 +636,12 @@ class DummyWatcher(Thread):
         self._loop = False
         self._event.set()
 
+
 class Cleaner(Thread):
+
     """Dummy watcher for test purposes
     """
+
     def __init__(self, holder, delay):
         Thread.__init__(self)
         self._holder = holder
@@ -620,8 +660,6 @@ class Cleaner(Thread):
                 if key < datetime.utcnow() - timedelta(hours=self._delay):
                     self._holder.delete(sat, key)
 
-
-
     def run(self):
         while self._loop:
             self.clean()
@@ -633,7 +671,9 @@ class Cleaner(Thread):
         self._loop = False
         self._event.set()
 
+
 class Holder(object):
+
     """The mighty data holder
     """
 
@@ -691,9 +731,12 @@ class Holder(object):
         msg = Message(subject, "have", to_send).encode()
         self._pub.send(msg)
 
+
 class Publisher(object):
+
     """Publish stuff.
     """
+
     def __init__(self, context, port):
         self._context = context
         self._socket = self._context.socket(PUB)
@@ -713,7 +756,9 @@ class Publisher(object):
             self._socket.setsockopt(LINGER, 0)
             self._socket.close()
 
+
 class ScheduleReader(object):
+
     """Reads and handles a schedule
     """
 
@@ -742,7 +787,9 @@ class ScheduleReader(object):
                 self._next_pass = overpass
                 return overpass
 
+
 class Heart(Thread):
+
     """Send heartbeats once in a while.
     """
 
@@ -761,7 +808,7 @@ class Heart(Thread):
             to_send["next_pass"] = (self._schedule_reader.get_next_pass() or
                                     str(self._schedule_reader._next_pass))
             to_send["addr"] = self._address
-            msg =  Message(subject, "heartbeat", to_send).encode()
+            msg = Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
             self._pub.send(msg)
             self._event.wait(self._interval)
@@ -772,7 +819,9 @@ class Heart(Thread):
         self._loop = False
         self._event.set()
 
+
 class RequestManager(Thread):
+
     """Manage requests.
     """
 
@@ -845,16 +894,16 @@ class RequestManager(Thread):
                         if message.type == "ping":
                             reply = self.pong()
                         elif (message.type == "request" and
-                            message.data["type"] == "scanline"):
+                              message.data["type"] == "scanline"):
                             reply = self.scanline(message)
                         elif (message.type == "notice" and
                               message.data["type"] == "scanline"):
                             reply = self.notice(message)
-                        else: # unknown request
+                        else:  # unknown request
                             reply = self.unknown(message)
                     finally:
                         self.send(reply)
-            else: # timeout
+            else:  # timeout
                 pass
 
     def stop(self):
@@ -864,9 +913,11 @@ class RequestManager(Thread):
         self._socket.setsockopt(LINGER, 0)
         self._socket.close()
 
+
 def set_subject(station):
     global subject
     subject = '/oper/polar/direct_readout/' + station
+
 
 def serve(configfile):
     """Serve forever.
@@ -929,9 +980,10 @@ def serve(configfile):
         watcher = None
 
         if not os.path.exists(path):
-            logger.warning(path + " doesn't exist, not getting data from files")
+            logger.warning(
+                path + " doesn't exist, not getting data from files")
         else:
-            pattern = cfg.get("local_reception", "file_pattern")
+            pattern = cfg.get("local_reception", "file_pattern", raw=True)
             watcher = FileWatcher(holder, os.path.join(path, pattern), sched)
             watcher.start()
 
@@ -996,7 +1048,6 @@ def serve(configfile):
             pass
 
 
-
 if __name__ == '__main__':
     import sys
     ch1 = logging.StreamHandler()
@@ -1014,6 +1065,3 @@ if __name__ == '__main__':
         serve(sys.argv[1])
     except KeyboardInterrupt:
         print "ok, stopping"
-
-
-
