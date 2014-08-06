@@ -53,6 +53,7 @@ REQ_TIMEOUT = 1000
 BUFFER_TIME = 2.0
 context = Context()
 
+
 class Subscriber(object):
 
     def __init__(self, addresses, translate=False):
@@ -68,6 +69,7 @@ class Subscriber(object):
             self._poller.register(subscriber)
         self._lock = Lock()
         self._loop = True
+
     @property
     def sub_addr(self):
         return dict(zip(self.subscribers, self._addresses))
@@ -122,6 +124,7 @@ class Subscriber(object):
                 sub.setsockopt(LINGER, 0)
                 sub.close()
 
+
 def create_subscriber(cfgfile):
     """Create a new subscriber for all the remote hosts in cfgfile.
     """
@@ -139,7 +142,9 @@ def create_subscriber(cfgfile):
     logger.debug("Subscribing to " + str(addrs))
     return Subscriber(addrs, translate=True)
 
+
 class RTimer(Thread):
+
     def __init__(self, tries, warning_message, function, *args, **kwargs):
         Thread.__init__(self)
         self.event = Event()
@@ -147,8 +152,8 @@ class RTimer(Thread):
         self.loop = True
         self.tries = tries
         self.attempt = 0
-        self.args=args
-        self.kwargs=kwargs
+        self.args = args
+        self.kwargs = kwargs
         self.alert_func = function
         self.warning = warning_message
 
@@ -182,6 +187,7 @@ def reset_subscriber(subscriber, addr):
     logger.warning("Resetting connection to " + addr)
     subscriber.reset(addr)
 
+
 def create_timers(cfgfile, subscriber):
     cfg = ConfigParser()
     cfg.read(cfgfile)
@@ -195,11 +201,12 @@ def create_timers(cfgfile, subscriber):
                  cfg.get(localhost, "hostname") + ":" +
                  cfg.get(localhost, "pubport"))
     for addr in addrs:
-        timers[addr] = RTimer(1, addr+" seems to be down, no hearbeat received",
+        timers[addr] = RTimer(1, addr + " seems to be down, no hearbeat received",
                               reset_subscriber, subscriber, addr)
 
         timers[addr].start()
     return timers
+
 
 def create_requesters(cfgfile):
     """Create requesters to all the configure remote hosts.
@@ -218,6 +225,7 @@ def create_requesters(cfgfile):
     url = "tcp://" + host + ":" + port
     requesters[host] = Requester(host, port, station, pubport)
     return requesters
+
 
 class SimpleRequester(object):
 
@@ -248,7 +256,6 @@ class SimpleRequester(object):
         self._socket.setsockopt(LINGER, 0)
         self._socket.close()
 
-
     def send_and_recv(self, msg, timeout=None):
         """Sending *msg* and returning the reply. This function retries in case
         of timeouts.
@@ -275,13 +282,14 @@ class SimpleRequester(object):
                     self.stop()
                     retries_left -= 1
                     if retries_left == 0:
-                        logger.error("Server doesn't answer, abandoning... "+
+                        logger.error("Server doesn't answer, abandoning... " +
                                      str(self._reqaddress))
                         self.connect()
                         return
                     logger.info("Reconnecting and resending " + str(msg))
                     self.connect()
                     self._socket.send(str(msg))
+
 
 class Requester(object):
 
@@ -296,6 +304,7 @@ class Requester(object):
         self._station = station
         self._pubport = pubport
         self._poller = Poller()
+        self._socket = None
         self.connect()
         self.blocked = False
         self.lock = Lock()
@@ -304,13 +313,13 @@ class Requester(object):
         """Reset the socket
         """
         self.stop()
-        self.connect(self)
+        self.connect()
 
     def connect(self):
         """Connect the socket.
         """
         self._socket = context.socket(REQ)
-        self._socket.connect("tcp://"+self._host+":"+str(self._port))
+        self._socket.connect("tcp://" + self._host + ":" + str(self._port))
         self._poller.register(self._socket, POLLIN)
 
     def stop(self):
@@ -353,18 +362,19 @@ class Requester(object):
                     reply = self._socket.recv()
                     rep = Message(rawstr=reply)
                     if rep.binary:
-                        logger.debug("Got reply: " + " ".join(str(rep).split()[:6]))
+                        logger.debug(
+                            "Got reply: " + " ".join(str(rep).split()[:6]))
                     else:
                         logger.debug("Got reply: " + str(rep))
                     return Message(rawstr=reply)
                 else:
-                    logger.warning("Timeout from tcp://"+self._host+":"
-                                   +str(self._port)+", retrying...")
+                    logger.warning("Timeout from tcp://" + self._host + ":"
+                                   + str(self._port) + ", retrying...")
                     self.stop()
                     retries_left -= 1
                     if retries_left == 0:
-                        logger.error("Server doesn't answer, abandoning... "+
-                                     "tcp://"+self._host+":" +str(self._port))
+                        logger.error("Server doesn't answer, abandoning... " +
+                                     "tcp://" + self._host + ":" + str(self._port))
                         self.connect()
                         return
                     logger.info("Reconnecting and resending " + str(msg))
@@ -402,8 +412,7 @@ class Requester(object):
             else:
                 return resp.data
         except AttributeError:
-            None
-
+            return None
 
     def get_slice(self, satellite, start_time, end_time):
         """Get a slice of scanlines.
@@ -432,7 +441,9 @@ class Requester(object):
         response = self.send_and_recv(msg, REQ_TIMEOUT)
         return response
 
+
 class HaveBuffer(Thread):
+
     """Listen to incomming have messages.
     """
 
@@ -466,7 +477,6 @@ class HaveBuffer(Thread):
         for queue in self._queues:
             queue.put_nowait((sat, utctime, self.scanlines[sat][utctime]))
 
-
     def run(self):
 
         for message in self._sub.recv(1):
@@ -485,7 +495,8 @@ class HaveBuffer(Thread):
                     quality = 100
                 self.scanlines.setdefault(sat, {})
                 if utctime not in self.scanlines[sat]:
-                    self.scanlines[sat][utctime] = [(sender, elevation, quality)]
+                    self.scanlines[sat][utctime] = [
+                        (sender, elevation, quality)]
                     # TODO: This implies that we always wait BUFFER_TIME before
                     # sending to queue. In the case were the "have" messages of
                     # all servers were sent in less time, we should not be
@@ -504,7 +515,7 @@ class HaveBuffer(Thread):
                     self.scanlines[sat][utctime].append((sender, elevation,
                                                          quality))
                     if (len(self.scanlines[sat][utctime]) ==
-                        len(self._requesters)):
+                            len(self._requesters)):
                         self.send_to_queues(sat, utctime)
             elif(message.type == "heartbeat"):
                 senderhost = message.sender.split("@")[1]
@@ -530,14 +541,13 @@ class HaveBuffer(Thread):
                                          "ms")
                         break
 
-
-
     def stop(self):
         """Stop buffering.
         """
         self._sub.stop()
         for timer in self._hb.values():
             timer.stop()
+
 
 def compute_line_times(utctime, start_time, end_time):
     """Compute the times of lines if a swath order depending on a reference
@@ -553,13 +563,15 @@ def compute_line_times(utctime, start_time, end_time):
     time_diff = time_diff.seconds + time_diff.microseconds / 1000000.0
     nblines = int(np.ceil(time_diff * LINES_PER_SECOND))
     rst = start_time + offset
-    linepos = [rst + timedelta(seconds=round(i * 1.0/
+    linepos = [rst + timedelta(seconds=round(i * 1.0 /
                                              LINES_PER_SECOND, 3))
                for i in range(nblines)]
     linepos = set(linepos)
     return linepos
 
+
 class Client(HaveBuffer):
+
     """The client class.
     """
 
@@ -577,9 +589,9 @@ class Client(HaveBuffer):
             hostname, elevation = max(hosts, key=(lambda x: x[1]))
             host = hostname.split(":")[0]
 
-            logger.debug("requesting " +  " ".join([str(satellite),
-                                                    str(utctime),
-                                                    str(host)]))
+            logger.debug("requesting " + " ".join([str(satellite),
+                                                   str(utctime),
+                                                   str(host)]))
             data = self._requesters[host].get_line(satellite, utctime)
 
             yield utctime, data, elevation
@@ -604,7 +616,7 @@ class Client(HaveBuffer):
                         logger.info("Start receiving data for " + sat)
 
                     logger.debug("Picking line " + " ".join([str(utctime),
-                                                         str(senders)]))
+                                                             str(senders)]))
                     # choose the highest elevation and quality
                     sender, elevation, quality = max(senders,
                                                      key=(lambda x: (x[2],
@@ -616,9 +628,10 @@ class Client(HaveBuffer):
                     # TODO: this should be parallelized, and timed. I case of
                     # failure, another source should be used. Choking ?
                     line = self._requesters[sender.split(":")[0]].get_line(sat,
-                                                                       utctime)
+                                                                           utctime)
                     if line is None:
-                        logger.warning("Could not retrieve line " + str(utctime))
+                        logger.warning(
+                            "Could not retrieve line " + str(utctime))
                     else:
                         sat_lines[sat][utctime] = line
                 except Empty:
@@ -656,8 +669,6 @@ class Client(HaveBuffer):
                 del sat_last_seen[sat]
             raise
 
-
-
     def order(self, time_slice, satellite, filename):
         """Get all the scanlines for a *satellite* within a *time_slice* and
         save them in *filename*. The scanlines will be saved in a contiguous
@@ -667,7 +678,6 @@ class Client(HaveBuffer):
         end_time = time_slice.stop
 
         saved = []
-
 
         # Create a file of the right length, filled with zeros. The alternative
         # would be to store all the scanlines in memory.
@@ -704,8 +714,6 @@ class Client(HaveBuffer):
                                                                      elevation))
                 except IOError, e__:
                     logger.warning(e__)
-
-
 
             # get lines with highest elevation and add them to current scene
             logger.info("Getting old scanlines.")
@@ -794,10 +802,8 @@ class Client(HaveBuffer):
         del port
         self._requesters[host].send_lineinfo(*args, **kwargs)
 
-
     def stop(self):
         HaveBuffer.stop(self)
         self.loop = False
         for req in self._requesters.values():
             req.stop()
-

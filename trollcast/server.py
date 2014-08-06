@@ -48,6 +48,10 @@ from trollsift.parser import globify, parse
 
 logger = logging.getLogger(__name__)
 
+subject = None
+coords = None
+tle_files = None
+
 
 def get_f_elev(satellite):
     """Get the elevation function for a given satellite
@@ -198,70 +202,6 @@ class HRPT(object):
 
 FORMATS = [CADU, HRPT]
 
-#from watchdog.events import FileSystemEventHandler
-#from watchdog.observers import Observer
-
-# class WDFileWatcher(FileSystemEventHandler):
-#     """Watch files
-#     """
-#     def __init__(self, holder, uri):
-#         FileSystemEventHandler.__init__(self)
-#         self._holder = holder
-#         self._uri = uri
-#         self._loop = True
-#         self._notifier = Observer()
-#         self._path, self._pattern = os.path.split(urlparse(self._uri).path)
-#         self._notifier.schedule(self, self._path, recursive=False)
-#         self._readers = {}
-
-#     def _reader(self, pathname):
-#         """Read the file
-#         """
-# FIXME: the _readers dict has to be cleaned up !!
-# FIXME: don't open the file each time.
-#         try:
-#             with open(pathname) as fp_:
-#                 try:
-#                     filereader, position, f_elev = self._readers[pathname]
-#                 except KeyError:
-#                     position = 0
-#                     f_elev = None
-#                 else:
-#                     fp_.seek(position)
-
-#                 data = fp_.read()
-
-#                 if position == 0:
-#                     for filetype in FORMATS:
-#                         if filetype.is_it(data):
-#                             filereader = filetype()
-
-#                 for elt, offset, f_elev in filereader.read(data, f_elev):
-#                     self._readers[pathname] = filereader, position + offset, f_elev
-#                     yield elt
-#         except IOError, e:
-#             logger.warning("Can't read file: " + str(e))
-#             return
-
-
-#     def start(self):
-#         """Start the file watcher
-#         """
-#         self._notifier.start()
-
-#     def stop(self):
-#         """Stop the file watcher
-#         """
-#         self._notifier.stop()
-
-#     def on_modified(self, event):
-#         path, fname = os.path.split(event.src_path)
-#         del path
-#         if not fnmatch(fname, self._pattern):
-#             return
-
-#         for sat, key, elevation, qual, data in self._reader(event.src_path):
-#             self._holder.add(sat, key, elevation, qual, data)
 
 class FileWatcher(object):
 
@@ -306,8 +246,8 @@ class _EventHandler(ProcessEvent):
         self._timer = None
         self.sat = None
 
-        if self._schedule_reader._next_pass:
-            next_pass_in = (self._schedule_reader._next_pass[0]
+        if self._schedule_reader.next_pass:
+            next_pass_in = (self._schedule_reader.next_pass[0]
                             - datetime.utcnow())
             if next_pass_in.seconds > 0:
                 self._timer = Timer(next_pass_in.seconds + 5,
@@ -321,8 +261,8 @@ class _EventHandler(ProcessEvent):
 
     def stop_receiving(self):
         self._receiving = False
-        if self._schedule_reader._next_pass:
-            next_pass_in = (self._schedule_reader._next_pass[0]
+        if self._schedule_reader.next_pass:
+            next_pass_in = (self._schedule_reader.next_pass[0]
                             - datetime.utcnow())
             self._timer = Timer(next_pass_in.seconds + 5,
                                 logger.error,
@@ -380,7 +320,7 @@ class _EventHandler(ProcessEvent):
 
         if self._fp is None and fnmatch(fname, globify(self._pattern)):
             self._fp = open(event.pathname)
-            self._current_pass = self._schedule_reader._next_pass
+            self._current_pass = self._schedule_reader.next_pass
             info = parse(self._pattern, fname)
             try:
                 self.sat = " ".join(info["platform"], info["number"])
@@ -400,7 +340,7 @@ class _EventHandler(ProcessEvent):
         if not self.process_IN_OPEN(event):
             return
 
-        self._current_pass = self._schedule_reader._next_pass
+        self._current_pass = self._schedule_reader.next_pass
 
         fname = os.path.basename(event.pathname)
 
@@ -422,93 +362,6 @@ class _EventHandler(ProcessEvent):
         self.stop_receiving()
         del self._readers[event.pathname]
 
-
-class _OldMirrorGetter(object):
-
-    """Gets data from the mirror when needed.
-    """
-
-    def __init__(self, socket, sat, key, lock):
-        self._socket = socket
-        self._sat = sat
-        self._key = key
-        self._lock = lock
-        self._data = None
-
-    def get_data(self):
-        """Get the actual data from the server we're mirroring
-        """
-        if self._data is not None:
-            return self._data
-
-        logger.debug("Grabbing scanline from mirror")
-        req = Message(subject,
-                      'request',
-                      {"type": "scanline",
-                       "satellite": self._sat,
-                       "utctime": self._key})
-        with self._lock:
-            self._socket.send(str(req))
-            rep = Message.decode(self._socket.recv())
-        # FIXME: check that there actually is data there.
-        self._data = rep.data
-        logger.debug("Retrieved scanline from mirror successfully")
-        return self._data
-
-    def __str__(self):
-        return self.get_data()
-
-    def __add__(self, other):
-        return str(self) + other
-
-    def __radd__(self, other):
-        return other + str(self)
-
-
-class OldMirrorWatcher(Thread):
-
-    """Watches a other server.
-    """
-
-    def __init__(self, holder, context, host, pubport, reqport):
-        Thread.__init__(self)
-        self._holder = holder
-        self._pubaddress = "tcp://" + host + ":" + str(pubport)
-        self._reqaddress = "tcp://" + host + ":" + str(reqport)
-
-        self._reqsocket = context.socket(REQ)
-        self._reqsocket.connect(self._reqaddress)
-
-        self._subsocket = context.socket(SUB)
-        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
-        self._subsocket.connect(self._pubaddress)
-        self._lock = Lock()
-        self._loop = True
-
-    def run(self):
-        while self._loop:
-            message = Message.decode(self._subsocket.recv())
-            if message.type == "have":
-                sat = message.data["satellite"]
-                key = strp_isoformat(message.data["timecode"])
-                elevation = message.data["elevation"]
-                quality = message.data.get("quality", 100)
-                data = _OldMirrorGetter(self._reqsocket,
-                                        sat, key,
-                                        self._lock)
-                self._holder.add(sat, key, elevation, quality, data)
-            if message.type == "heartbeat":
-                logger.debug("Got heartbeat from " + str(self._pubaddress)
-                             + ": " + str(message))
-
-    def stop(self):
-        """Stop the watcher
-        """
-        self._loop = False
-        self._reqsocket.setsockopt(LINGER, 0)
-        self._reqsocket.close()
-        self._subsocket.setsockopt(LINGER, 0)
-        self._subsocket.close()
 
 from trollcast.client import SimpleRequester
 
@@ -599,7 +452,7 @@ class MirrorWatcher(Thread):
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
-                self._sched._next_pass = message.data["next_pass"]
+                self._sched.next_pass = message.data["next_pass"]
                 last_hb = datetime.now()
                 minutes = 2
 
@@ -771,7 +624,7 @@ class ScheduleReader(object):
         """
         self._filename = filename
         self._fileformat = fileformat
-        self._next_pass = None
+        self.next_pass = None
 
     def get_next_pass(self):
         """Get the next pass from the schedule
@@ -784,7 +637,7 @@ class ScheduleReader(object):
         now = datetime.utcnow()
         for overpass in fun(self._filename):
             if overpass[2] > now:
-                self._next_pass = overpass
+                self.next_pass = overpass
                 return overpass
 
 
@@ -806,7 +659,7 @@ class Heart(Thread):
         while self._loop:
             to_send = {}
             to_send["next_pass"] = (self._schedule_reader.get_next_pass() or
-                                    str(self._schedule_reader._next_pass))
+                                    str(self._schedule_reader.next_pass))
             to_send["addr"] = self._address
             msg = Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
