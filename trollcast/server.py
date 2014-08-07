@@ -28,7 +28,7 @@ TODO:
 """
 
 from ConfigParser import ConfigParser, NoOptionError
-from zmq import Context, Poller, LINGER, PUB, REP, REQ, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
+from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
 from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
 from pyorbital.orbital import Orbital
@@ -318,12 +318,15 @@ class _EventHandler(ProcessEvent):
 
         fname = os.path.basename(event.pathname)
 
-        if self._fp is None and fnmatch(fname, globify(self._pattern)):
+        if not fnmatch(fname, globify(self._pattern)):
+            return False
+
+        if self._fp is None:
             self._fp = open(event.pathname)
             self._current_pass = self._schedule_reader.next_pass
             info = parse(self._pattern, fname)
             try:
-                self.sat = " ".join(info["platform"], info["number"])
+                self.sat = " ".join((info["platform"], info["number"]))
             except KeyError:
                 logger.info("Could not retrieve satellite name from filename")
                 pass
@@ -344,7 +347,7 @@ class _EventHandler(ProcessEvent):
 
         fname = os.path.basename(event.pathname)
 
-        if not fnmatch(fname, self._pattern):
+        if not fnmatch(fname, globify(self._pattern)):
             return
 
         self.start_receiving()
