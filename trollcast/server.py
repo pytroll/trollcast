@@ -359,7 +359,10 @@ class _EventHandler(ProcessEvent):
     def process_IN_CLOSE_WRITE(self, event):
         """Clean up.
         """
-        self._fp.close()
+        if self._fp is not None:
+            self._fp.close()
+        else:
+            logger.warning("File descriptor is None for %s", str(event))
         self._fp = None
         self._schedule_reader.get_next_pass()
         self.stop_receiving()
