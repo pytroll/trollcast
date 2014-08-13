@@ -601,6 +601,7 @@ class Client(HaveBuffer):
         """
         sat_last_seen = {}
         sat_lines = {}
+        first_time = None
         for sat in satellites:
             sat_lines[sat] = {}
         queue = Queue()
@@ -625,7 +626,7 @@ class Client(HaveBuffer):
                     logger.debug("requesting " +
                                  " ".join([str(sat), str(utctime),
                                            str(sender), str(elevation)]))
-                    # TODO: this should be parallelized, and timed. I case of
+                    # TODO: this should be parallelized, and timed. In case of
                     # failure, another source should be used. Choking ?
                     line = self._requesters[sender.split(":")[0]].get_line(sat,
                                                                            utctime)
@@ -634,6 +635,9 @@ class Client(HaveBuffer):
                             "Could not retrieve line " + str(utctime))
                     else:
                         sat_lines[sat][utctime] = line
+                        if first_time is None and quality == 100:
+                            first_time = utctime
+
                 except Empty:
                     pass
                 for sat, (utctime, elevation) in sat_last_seen.items():
@@ -643,7 +647,8 @@ class Client(HaveBuffer):
                          len(sat_lines[sat]) > 100)):
                         # write the lines to file
                         try:
-                            first_time = min(sat_lines[sat].keys())
+                            first_time = (first_time
+                                          or min(sat_lines[sat].keys()))
                             logger.info(sat +
                                         " seems to be inactive now, writing file.")
                             filename = first_time.isoformat() + sat + ".hmf"
@@ -656,10 +661,12 @@ class Client(HaveBuffer):
                         finally:
                             sat_lines[sat] = {}
                             del sat_last_seen[sat]
+                            first_time = None
         except KeyboardInterrupt:
             for sat, (utctime, elevation) in sat_last_seen.items():
                 logger.info(sat + ": writing file.")
-                first_time = min(sat_lines[sat].keys())
+                first_time = (first_time
+                              or min(sat_lines[sat].keys()))
                 filename = first_time.isoformat() + sat + ".hmf"
                 with open(filename, "wb") as fp_:
                     for linetime in sorted(sat_lines[sat].keys()):
