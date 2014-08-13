@@ -161,8 +161,8 @@ class HRPT(object):
                     np.sum(line['frame_sync'] == self.hrpt_sync_start))
             qual = (100 * qual) / 106
 
-            qual -= abs(np.diff(line['image_data']
-                                [:, 4].astype(np.float64))) > 300
+            qual -= np.sum(abs(np.diff(line['image_data']
+                                       [:, 4].astype(np.float64))) > 300)
 
             qual = max(0, qual)
 
