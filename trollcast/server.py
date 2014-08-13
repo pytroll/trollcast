@@ -319,6 +319,7 @@ class _EventHandler(ProcessEvent):
         fname = os.path.basename(event.pathname)
 
         if not fnmatch(fname, globify(self._pattern)):
+            logger.debug("Ignoring %s", event.pathname)
             return False
 
         if self._fp is None:
@@ -329,7 +330,6 @@ class _EventHandler(ProcessEvent):
                 self.sat = " ".join((info["platform"], info["number"]))
             except KeyError:
                 logger.info("Could not retrieve satellite name from filename")
-                pass
 
         self.start_receiving()
         return self._fp is not None
@@ -338,10 +338,10 @@ class _EventHandler(ProcessEvent):
         """File has been modified, read it !
         """
 
-        logger.debug("File modified! %s", event.pathname)
-
         if not self.process_IN_OPEN(event):
             return
+
+        logger.debug("File modified! %s", event.pathname)
 
         self._current_pass = self._schedule_reader.next_pass
 
@@ -359,15 +359,22 @@ class _EventHandler(ProcessEvent):
     def process_IN_CLOSE_WRITE(self, event):
         """Clean up.
         """
+        fname = os.path.basename(event.pathname)
+
+        if not fnmatch(fname, globify(self._pattern)):
+            return
+
         if self._fp is not None:
             self._fp.close()
         else:
-            logger.warning("File descriptor is None for %s", str(event))
+            logger.warning("File descriptor is None for %s", event.pathname)
         self._fp = None
         self._schedule_reader.get_next_pass()
         self.stop_receiving()
-        del self._readers[event.pathname]
-
+        try:
+            del self._readers[event.pathname]
+        except KeyError:
+            logger.info("No reader defined for %s", str(event.pathname))
 
 from trollcast.client import SimpleRequester
 
