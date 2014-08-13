@@ -1,7 +1,7 @@
 # Copyright (c) 2009, 2011, 2012, 2014.
 #
 
-# Author(s): 
+# Author(s):
 #   Martin Raspaud <martin.raspaud@smhi.se>
 
 # This program is free software: you can redistribute it and/or modify
@@ -36,6 +36,7 @@ import sys
 import os
 import struct
 
+
 def show(data, filename=None):
     """Show the stretched data.
     """
@@ -47,22 +48,26 @@ def show(data, filename=None):
     else:
         img.show()
 
+
 def print_bfield(word):
     """Print the bits of a give word.
     """
     for i in range(10):
-        print "bit", i+1, (word & 2**(9 - i))/2**(9 - i)
+        print "bit", i + 1, (word & 2 ** (9 - i)) / 2 ** (9 - i)
+
 
 def bfield(array, bit):
     """return the bit array.
     """
-    return (array & 2**(9 - bit + 1)).astype(np.bool)
+    return (array & 2 ** (9 - bit + 1)).astype(np.bool)
 
 st_time = datetime.now()
+
 
 def tic():
     global st_time
     st_time = datetime.now()
+
 
 def toc():
     print datetime.now() - st_time
@@ -78,12 +83,12 @@ def timecode(tc_array):
     msecs *= 1024
     word = tc_array[3]
     msecs += word & 1023
-    return datetime(2014, 1, 1) + timedelta(days=int(day/2 - 1),
+    return datetime(2014, 1, 1) + timedelta(days=int(day / 2 - 1),
                                             milliseconds=int(msecs))
 
 
-## NOAA19
-## http://www.ncdc.noaa.gov/oa/pod-guide/ncdc/docs/klm/html/d/app-d.htm
+# NOAA19
+# http://www.ncdc.noaa.gov/oa/pod-guide/ncdc/docs/klm/html/d/app-d.htm
 
 # VIS channels
 
@@ -113,15 +118,17 @@ b2 = np.array([0, 0.00054668, 0.00024985])
 
 
 # Constants
-               
-c1 = 1.1910427e-5 #mW/(m2-sr-cm-4)
-c2 = 1.4387752 #cm-K 
+
+c1 = 1.1910427e-5  # mW/(m2-sr-cm-4)
+c2 = 1.4387752  # cm-K
+
 
 def read_u2_bytes(fdes):
     return struct.unpack("<H", fdes.read(2))[0]
 
-## Reading
-## http://www.ncdc.noaa.gov/oa/pod-guide/ncdc/docs/klm/html/c4/sec4-1.htm#t413-1
+# Reading
+# http://www.ncdc.noaa.gov/oa/pod-guide/ncdc/docs/klm/html/c4/sec4-1.htm#t413-1
+
 
 def read_file(filename, swap=None):
     dtype = np.dtype([('frame_sync', '<u2', (6, )),
@@ -131,7 +138,7 @@ def read_file(filename, swap=None):
                       ('telemetry', [("ramp_calibration", '<u2', (5, )),
                                      ("PRT", '<u2', (3, )),
                                      ("ch3_patch_temp", '<u2'),
-                                     ("spare", '<u2'),]),
+                                     ("spare", '<u2'), ]),
                       ('back_scan', '<u2', (10, 3)),
                       ('space_data', '<u2', (10, 5)),
                       ('sync', '<u2'),
@@ -149,7 +156,7 @@ def read_file(filename, swap=None):
     return arr
 
 
-## VIS calibration
+# VIS calibration
 
 def vis_cal(vis_data):
     """Calibrates the visual data using dual gain.
@@ -157,25 +164,26 @@ def vis_cal(vis_data):
     print "Visual calibration"
     vis = np.empty(vis_data.shape, dtype=np.float64)
     for i in range(3):
-        ch = vis_data[:, :, i]
+        ch = vis_data[:,:, i]
         intersect = intersections[i]
         slope_l = slopes_l[i]
         slope_h = slopes_h[i]
         intercept_l = intercepts_l[i]
         intercept_h = intercepts_h[i]
 
-        vis[:, :, i] = ne.evaluate("where(ch > intersect, ch * slope_l + intercept_l, ch * slope_h + intercept_h)")
+        vis[:,:, i] = ne.evaluate("where(ch > intersect, ch * slope_l + intercept_l, ch * slope_h + intercept_h)")
     return vis
 
-## IR calibration
+# IR calibration
+
 
 def ir_cal(ir_data, telemetry, back_scan, space_data):
-    alen = array.shape[0]
+    alen = ir_data.shape[0]
     print "IR calibration"
     print " Preparing telemetry..."
     factor = np.ceil(alen / 5.0) + 1
 
-    displacement = (telemetry['PRT'][0:5, :] == np.array([0, 0, 0])).sum(1).argmax() + 1
+    displacement = (telemetry['PRT'][0:5,:] == np.array([0, 0, 0])).sum(1).argmax() + 1
     offset = 4 - (displacement - 1)
 
     bd0 = np.tile(d0.reshape(-1, 1), (factor, 3))[offset:offset + alen]
@@ -187,28 +195,30 @@ def ir_cal(ir_data, telemetry, back_scan, space_data):
     PRT = telemetry['PRT']
     T_PRT = bd0 + PRT * (bd1 + PRT * (bd2 + PRT * (bd3 + PRT * bd4)))
 
-    sublen = np.floor(T_PRT[displacement:, :].shape[0] / 5.0) * 5
+    sublen = np.floor(T_PRT[displacement:,:].shape[0] / 5.0) * 5
     TMP_PRT = T_PRT[displacement:displacement + sublen]
 
     print " Computing blackbody temperatures..."
-    
+
     MEAN = ((TMP_PRT[::5] +
              TMP_PRT[1::5] +
              TMP_PRT[2::5] +
              TMP_PRT[3::5]) / 4).repeat(5, 0)
 
-    T_BB_beg = np.tile(T_PRT[:displacement].sum(0) / (displacement - 1), (displacement, 1))
-    T_BB_end = np.tile(T_PRT[sublen+displacement:].mean(0), (T_PRT.shape[0] - sublen - displacement, 1))
+    T_BB_beg = np.tile(
+        T_PRT[:displacement].sum(0) / (displacement - 1), (displacement, 1))
+    T_BB_end = np.tile(
+        T_PRT[sublen + displacement:].mean(0), (T_PRT.shape[0] - sublen - displacement, 1))
 
     T_BB = np.vstack([MEAN, T_BB_beg, T_BB_end])
     T_BB_star = A + B * T_BB
 
-    N_BB = (c1 * vc ** 3) / (np.exp((c2 * vc)/(T_BB_star)) - 1)
+    N_BB = (c1 * vc ** 3) / (np.exp((c2 * vc) / (T_BB_star)) - 1)
 
     C_S = space_data[:,:, 2:].mean(1)
     C_BB = back_scan.mean(1)
 
-    C_E = ir_data[:, :, 2:]
+    C_E = ir_data[:,:, 2:]
 
     print " Computing linear part of radiances..."
 
@@ -225,12 +235,14 @@ def ir_cal(ir_data, telemetry, back_scan, space_data):
 
     return T_E
 
+
 def scanlines(filename):
     epoch = datetime(2000, 1, 1)
     bytelen = 11090 * 2
     arr = read_file(filename)
     times = ((timecode(tc_array) - epoch) for tc_array in arr["timecode"])
-    times = [a.days * 24 * 3600 + a.seconds + (a.microseconds / 1000) / 1000.0 for a in times]
+    times = [a.days * 24 * 3600 + a.seconds +
+             (a.microseconds / 1000) / 1000.0 for a in times]
     pos = np.arange(len(times)) * bytelen
     return zip(times, pos, [bytelen] * len(times))
 
@@ -242,24 +254,24 @@ if __name__ == "__main__":
     except IndexError:
         outfile = None
     tic = datetime.now()
-    array = read_file(f)
+    data_array = read_file(f)
     toc = datetime.now()
-    print "took", toc - tic, "to read", array["image_data"].shape 
-    print "Time of first scanline:", timecode(array["timecode"][0])
-    vis = vis_cal(array["image_data"][:, :, :3])
-    ir_ = ir_cal(array["image_data"][:, :, 2:], array["telemetry"],
-                 array["back_scan"], array["space_data"])
+    print "took", toc - tic, "to read", data_array["image_data"].shape
+    print "Time of first scanline:", timecode(data_array["timecode"][0])
+    vis = vis_cal(data_array["image_data"][:,:, :3])
+    ir_ = ir_cal(data_array["image_data"][:,:, 2:], data_array["telemetry"],
+                 data_array["back_scan"], data_array["space_data"])
 
-    channels = np.empty(array["image_data"].shape, dtype=np.float64)
-    channels[:, :, :2] = vis[:, :, :2]
-    channels[:, :, 3:] = ir_[:, :, 1:]
-    ch3a = bfield(array["id"]["id"], 10)
+    channels = np.empty(data_array["image_data"].shape, dtype=np.float64)
+    channels[:,:, :2] = vis[:,:, :2]
+    channels[:,:, 3:] = ir_[:,:, 1:]
+    ch3a = bfield(data_array["id"]["id"], 10)
     ch3b = np.logical_not(ch3a)
-    channels[ch3a, :, 2] = vis[ch3a, :, 2]
-    channels[ch3b, :, 2] = ir_[ch3b, :, 0]
+    channels[ch3a,:, 2] = vis[ch3a,:, 2]
+    channels[ch3b,:, 2] = ir_[ch3b,:, 0]
 
-    # remove line containing nans...
-    to_show = channels[:, :, 1]
+    # remove lines containing nans...
+    to_show = channels[:,:, 1]
     to_show = to_show[~np.isnan(to_show).any(1)]
 
     # show the result
