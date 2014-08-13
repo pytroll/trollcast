@@ -160,10 +160,16 @@ class HRPT(object):
             qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
                     np.sum(line['frame_sync'] == self.hrpt_sync_start))
             qual = (100 * qual) / 106
+
+            qual -= abs(np.diff(line['image_data']
+                                [:, 4].astype(np.float64))) > 300
+
+            qual = max(0, qual)
+
             logger.info("Quality " + str(qual))
 
             if qual != 100:
-                logger.info("Garbage line: " + str(utctime))
+                logger.info("Degraded line: " + str(utctime))
                 if f_elev is None:
                     satellite = "unknown"
                     yield ((satellite, utctime, None, qual,
