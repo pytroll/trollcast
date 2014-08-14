@@ -157,6 +157,10 @@ class HRPT(object):
                 # Can't have data from the future... yet :)
                 utctime = datetime(year - 1, 1, 1) + days
 
+            if not all(line['frame_sync'] == self.hrpt_sync_start):
+                logger.info("Frame sync not in place, skipping")
+                continue
+
             qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
                     np.sum(line['frame_sync'] == self.hrpt_sync_start))
             qual = (100 * qual) / 106
