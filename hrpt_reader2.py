@@ -33,7 +33,6 @@ import numpy as np
 import numexpr as ne
 from datetime import datetime, timedelta
 import sys
-import os
 import struct
 
 
@@ -62,15 +61,6 @@ def bfield(array, bit):
     return (array & 2 ** (9 - bit + 1)).astype(np.bool)
 
 st_time = datetime.now()
-
-
-def tic():
-    global st_time
-    st_time = datetime.now()
-
-
-def toc():
-    print datetime.now() - st_time
 
 
 def timecode(tc_array):
