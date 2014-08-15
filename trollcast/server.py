@@ -157,16 +157,16 @@ class HRPT(object):
                 # Can't have data from the future... yet :)
                 utctime = datetime(year - 1, 1, 1) + days
 
-            if not all(line['frame_sync'] == self.hrpt_sync_start):
-                logger.info("Frame sync not in place, skipping")
-                continue
-
             qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
                     np.sum(line['frame_sync'] == self.hrpt_sync_start))
             qual = (100 * qual) / 106
 
             qual -= np.sum(abs(np.diff(line['image_data']
-                                       [:, 4].astype(np.float64))) > 300)
+                                       [:, 4].astype(np.int16))) > 200)
+
+            if np.sum(line['frame_sync'] == self.hrpt_sync_start) < 5:
+                logger.info("Frame sync not in place, setting quality to 0")
+                qual = 0
 
             qual = max(0, qual)
 
@@ -364,7 +364,8 @@ class _EventHandler(ProcessEvent):
 
         for sat, key, elevation, qual, data in self._reader(event.pathname,
                                                             self._current_pass):
-            self._holder.add(sat, key, elevation, qual, data)
+            if qual > 0:
+                self._holder.add(sat, key, elevation, qual, data)
 
     def process_IN_CLOSE_WRITE(self, event):
         """Clean up.
