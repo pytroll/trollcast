@@ -141,6 +141,13 @@ class HRPT(object):
         msecs += word & 1023
         return timedelta(days=int(day / 2 - 1), milliseconds=int(msecs))
 
+    def __init__(self, sat, reftime):
+        self.sat = sat
+        self.reftime = reftime
+        self.count = 0
+        self.time_threshold = timedelta(seconds=60)
+        self.reftimes = []
+
     def read(self, data, f_elev=None):
         """Read hrpt data.
         """
@@ -153,6 +160,7 @@ class HRPT(object):
 
             days = self.timecode(line["timecode"])
             utctime = datetime(year, 1, 1) + days
+
             if utctime > now:
                 # Can't have data from the future... yet :)
                 utctime = datetime(year - 1, 1, 1) + days
@@ -167,6 +175,30 @@ class HRPT(object):
             if np.sum(line['frame_sync'] == self.hrpt_sync_start) < 5:
                 logger.info("Frame sync not in place, setting quality to 0")
                 qual = 0
+
+            # Take care of noisy time codes.
+
+            if (abs(utctime - (self.reftime + timedelta(seconds=self.count / 6.0)))
+                    > self.time_threshold):
+                logger.debug("Spurious time for scanline %s (should be %s)",
+                             str(utctime),
+                             str((self.reftime + timedelta(seconds=self.count / 6.0))))
+                qual = 0
+
+            if qual >= 95:
+                # adjusting reftime:
+                self.reftimes.append(
+                    utctime - timedelta(seconds=self.count / 6.0))
+                if (len(self.reftimes) > 50 and
+                        self.time_threshold > timedelta(milliseconds=50)):
+                    old_ref = self.reftime
+                    self.reftime = sorted(
+                        self.reftimes)[len(self.reftimes) / 2]
+                    self.time_threshold = timedelta(milliseconds=50)
+                    logger.info("Setting up new reftime %s (was %s)",
+                                str(self.reftime),
+                                str(old_ref))
+            self.count += 1
 
             qual = max(0, qual)
 
@@ -255,6 +287,7 @@ class _EventHandler(ProcessEvent):
         self._receiving = False
         self._timer = None
         self.sat = None
+        self.time = None
 
         if self._schedule_reader.next_pass:
             next_pass_in = (self._schedule_reader.next_pass[0]
@@ -295,7 +328,7 @@ class _EventHandler(ProcessEvent):
             if position == 0:
                 for filetype in FORMATS:
                     if filetype.is_it(data):
-                        filereader = filetype()
+                        filereader = filetype(self.sat, self.time)
 
             for elt, offset, f_elev in filereader.read(data, f_elev):
                 self._readers[pathname] = filereader, position + offset, f_elev
@@ -338,6 +371,7 @@ class _EventHandler(ProcessEvent):
             info = parse(self._pattern, fname)
             try:
                 self.sat = " ".join((info["platform"], info["number"]))
+                self.time = info["utctime"]
             except KeyError:
                 logger.info("Could not retrieve satellite name from filename")
 
