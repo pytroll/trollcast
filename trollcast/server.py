@@ -145,8 +145,10 @@ class HRPT(object):
         self.sat = sat
         self.reftime = reftime
         self.count = 0
-        self.time_threshold = timedelta(seconds=60)
+        self.time_threshold = timedelta(seconds=300)
         self.reftimes = []
+        self.last_time = None
+        self.lags = [0]
 
     def read(self, data, f_elev=None):
         """Read hrpt data.
@@ -178,6 +180,28 @@ class HRPT(object):
 
             # Take care of noisy time codes.
 
+            new_time = datetime.now()
+
+            # Check if we missed some scanlines
+            if(self.last_time is not None):
+                time_diff = (new_time - self.last_time)
+                seconds = (time_diff.days * 24 * 60 * 60
+                           + time_diff.seconds
+                           + time_diff.microseconds / 1000000.0)
+                self.lags.append(seconds)
+                if(abs(utctime - (self.reftime +
+                                  timedelta(seconds=self.count / 6.0 +
+                                            max(self.lags))))
+                   < timedelta(seconds=15)):
+                    logger.debug(
+                        "Looks like we lost some scanlines, adjusting %s counts.", seconds * 6.0)
+
+                    self.count += int(max(self.lags) * 6.0)
+                    self.time_threshold = timedelta(seconds=15)
+                    self.reftimes = []
+                    self.lags = [0]
+
+            # Check if scanline is within expected range
             if (abs(utctime - (self.reftime + timedelta(seconds=self.count / 6.0)))
                     > self.time_threshold):
                 logger.debug("Spurious time for scanline %s (should be %s)",
@@ -185,6 +209,7 @@ class HRPT(object):
                              str((self.reftime + timedelta(seconds=self.count / 6.0))))
                 qual = 0
 
+            # Adjust reference time upon good quality scanlines
             if qual >= 95:
                 # adjusting reftime:
                 self.reftimes.append(
@@ -198,7 +223,9 @@ class HRPT(object):
                     logger.info("Setting up new reftime %s (was %s)",
                                 str(self.reftime),
                                 str(old_ref))
+
             self.count += 1
+            self.last_time = new_time
 
             qual = max(0, qual)
 
@@ -300,7 +327,8 @@ class _EventHandler(ProcessEvent):
 
     def start_receiving(self):
         self._receiving = True
-        self._timer.cancel()
+        if self._timer is not None:
+            self._timer.cancel()
 
     def stop_receiving(self):
         self._receiving = False
@@ -321,8 +349,9 @@ class _EventHandler(ProcessEvent):
             except KeyError:
                 position = 0
                 f_elev = None
-            else:
-                self._fp.seek(position)
+
+            self._fp.seek(position)
+
             data = self._fp.read()
 
             if position == 0:
