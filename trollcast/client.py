@@ -39,6 +39,8 @@ from urlparse import urlsplit
 import numpy as np
 from posttroll.message import Message, strp_isoformat
 from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE
+import os.path
+from urlparse import urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +444,17 @@ class Requester(object):
         return response
 
 
+def create_publisher(cfgfile):
+    cfg = ConfigParser()
+    cfg.read(cfgfile)
+    publisher = cfg.get("local_reception", "output_dir", None)
+    if publisher:
+        from posttroll.publisher import NoisyPublisher
+        publisher = NoisyPublisher(publisher, 0)
+        publisher.start()
+        return publisher
+
+
 class HaveBuffer(Thread):
 
     """Listen to incomming have messages.
@@ -451,6 +464,13 @@ class HaveBuffer(Thread):
         Thread.__init__(self)
         self._sub = create_subscriber(cfgfile)
         self._hb = create_timers(cfgfile, self._sub)
+        self._publisher = create_publisher(cfgfile)
+        cfg = ConfigParser()
+        cfg.read(cfgfile)
+        self._out = cfg.get("local_reception", "output_dir", ".")
+        localhost = cfg.get("local_reception", "localhost")
+        self._hostname = cfg.get(localhost, "hostname")
+        self._station = cfg.get("local_reception", "station")
         self.scanlines = {}
         self._queues = []
         self._requesters = {}
@@ -547,6 +567,8 @@ class HaveBuffer(Thread):
         self._sub.stop()
         for timer in self._hb.values():
             timer.stop()
+        if self._publisher:
+            self._publisher.stop()
 
 
 def compute_line_times(utctime, start_time, end_time):
@@ -651,10 +673,40 @@ class Client(HaveBuffer):
                                           or min(sat_lines[sat].keys()))
                             logger.info(sat +
                                         " seems to be inactive now, writing file.")
-                            filename = first_time.isoformat() + sat + ".hmf"
+                            filename = os.path.join(self._out,
+                                                    first_time.isoformat()
+                                                    + sat + ".hmf")
                             with open(filename, "wb") as fp_:
                                 for linetime in sorted(sat_lines[sat].keys()):
                                     fp_.write(sat_lines[sat][linetime])
+                            if self._publisher:
+                                to_send = {}
+                                to_send["satellite"] = sat
+                                to_send["format"] = "HRPT"
+                                to_send["start_time"] = first_time
+                                to_send["level"] = 0
+                                to_send["filename"] = os.path.basename(
+                                    filename)
+                                fullname = os.path.realpath(filename)
+                                to_send["uri"] = urlunparse(("ssh",
+                                                             self._hostname,
+                                                             fullname,
+                                                             "",
+                                                             "",
+                                                             ""))
+                                to_send["instrument"] = ["avhrr/3",
+                                                         "mhs",
+                                                         "amsu"]
+                                to_send["type"] = "binary"
+                                msg = Message("/".join("",
+                                                       to_send["format"],
+                                                       to_send["level"],
+                                                       self._station),
+                                              "file",
+                                              to_send)
+                                logger.debug("publishing %s", str(msg))
+                                self._publisher.send(msg)
+
                         except ValueError:
                             logger.info("Got no lines for " + sat)
                             continue
