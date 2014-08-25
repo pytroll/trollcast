@@ -31,7 +31,7 @@ todo:
 from __future__ import with_statement
 
 import logging
-from ConfigParser import ConfigParser
+from ConfigParser import ConfigParser, NoOptionError
 from Queue import Queue, Empty
 from datetime import timedelta, datetime
 from threading import Thread, Timer, Event, Lock
@@ -447,7 +447,10 @@ class Requester(object):
 def create_publisher(cfgfile):
     cfg = ConfigParser()
     cfg.read(cfgfile)
-    publisher = cfg.get("local_reception", "output_dir", None)
+    try:
+        publisher = cfg.get("local_reception", "publisher")
+    except NoOptionError:
+        return None
     if publisher:
         from posttroll.publisher import NoisyPublisher
         publisher = NoisyPublisher(publisher, 0)
@@ -467,7 +470,10 @@ class HaveBuffer(Thread):
         self._publisher = create_publisher(cfgfile)
         cfg = ConfigParser()
         cfg.read(cfgfile)
-        self._out = cfg.get("local_reception", "output_dir", ".")
+        try:
+            self._out = cfg.get("local_reception", "output_dir")
+        except NoOptionError:
+            self._out = "."
         localhost = cfg.get("local_reception", "localhost")
         self._hostname = cfg.get(localhost, "hostname")
         self._station = cfg.get("local_reception", "station")
