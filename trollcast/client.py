@@ -704,10 +704,10 @@ class Client(HaveBuffer):
                                                          "mhs",
                                                          "amsu"]
                                 to_send["type"] = "binary"
-                                msg = Message("/".join("",
-                                                       to_send["format"],
-                                                       to_send["level"],
-                                                       self._station),
+                                msg = Message("/".join(("",
+                                                        to_send["format"],
+                                                        to_send["level"],
+                                                        self._station)),
                                               "file",
                                               to_send)
                                 logger.debug("publishing %s", str(msg))
