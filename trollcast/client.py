@@ -690,7 +690,7 @@ class Client(HaveBuffer):
                                 to_send["satellite"] = sat
                                 to_send["format"] = "HRPT"
                                 to_send["start_time"] = first_time
-                                to_send["level"] = 0
+                                to_send["level"] = "0"
                                 to_send["filename"] = os.path.basename(
                                     filename)
                                 fullname = os.path.realpath(filename)
