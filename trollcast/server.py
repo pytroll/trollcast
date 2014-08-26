@@ -477,9 +477,13 @@ class _MirrorGetter(object):
                           "satellite": self._sat,
                           "utctime": self._key})
         rep = self._req.send_and_recv(str(reqmsg), 300)
-        # FIXME: check that there actually is data there.
-        self._data = rep.data
-        logger.debug("Retrieved scanline from mirror successfully")
+
+        if rep and rep.data:
+            self._data = rep.data
+            logger.debug("Retrieved scanline from mirror successfully")
+        else:
+            self._data = None
+            logger.warning("Empty scanline from mirror!")
         return self._data
 
     def __str__(self):
@@ -841,6 +845,9 @@ class RequestManager(Thread):
                             reply = self.notice(message)
                         else:  # unknown request
                             reply = self.unknown(message)
+                    except:
+                        logger.exception("Something went wrong"
+                                         " when processing the request:")
                     finally:
                         self.send(reply)
             else:  # timeout
@@ -989,7 +996,9 @@ def serve(configfile):
 
 
 if __name__ == '__main__':
+
     import sys
+
     ch1 = logging.StreamHandler()
     ch1.setLevel(logging.DEBUG)
 
@@ -1000,6 +1009,26 @@ if __name__ == '__main__':
     logging.getLogger('').setLevel(logging.DEBUG)
     logging.getLogger('').addHandler(ch1)
     logger = logging.getLogger("trollcast_server")
+
+    # Test hrpt reading
+
+    coords = [16.148649, 58.581844, 0.052765]
+
+    reftime = datetime.strptime(
+        os.path.basename(sys.argv[1])[:14], "%Y%m%d%H%M%S")
+    sat = os.path.basename(sys.argv[1])[15:22].replace("_", " ")
+    print "***", reftime, sat
+
+    with open(sys.argv[1]) as fp:
+        lines = fp.read()
+
+    hrpt = HRPT(sat, reftime)
+
+    for truc in hrpt.read(lines):
+        print truc[0][:4]
+        # raw_input()
+
+    pause
 
     try:
         serve(sys.argv[1])
