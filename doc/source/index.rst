@@ -120,7 +120,21 @@ It is started with::
    trollcast_server my_config_file.cfg
 
 This will start a server that watches a given file, as specified in the
-configuration file. Add a ``-v`` if you want debugging info.
+configuration file. Some options are also available::
+
+
+ usage: trollcast_server [-h] [-l LOG] [-m MAIL] [-v] config_file
+
+ positional arguments:
+   config_file
+
+ optional arguments:
+   -h, --help            show this help message and exit
+   -l LOG, --log LOG     File to log to.
+   -m MAIL, --mail MAIL  Mail to log to.
+   -v, --verbose         Print out debug messages also.
+
+
 
 .. note::
 
@@ -154,6 +168,8 @@ Here is the usage of the client::
                          Output file (used only in conjuction with -t)
    -f CONFIG_FILE, --config_file CONFIG_FILE
                          eg. sattorrent_local.cfg
+   -l LOG, --log LOG     File to log to.
+
    -v, --verbose
 
 There are two ways of running the client:
