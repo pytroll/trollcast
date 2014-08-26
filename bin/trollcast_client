@@ -54,16 +54,16 @@ if __name__ == '__main__':
         ch1 = logging.StreamHandler()
     ch1.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter('[%(levelname)s %(name)s %(asctime)s] %(message)s')
+    formatter = logging.Formatter(
+        '[%(levelname)s %(name)s %(asctime)s] %(message)s')
     ch1.setFormatter(formatter)
     logging.getLogger('').addHandler(ch1)
     if args.verbose:
         logging.getLogger('').setLevel(logging.DEBUG)
     else:
         logging.getLogger('').setLevel(logging.INFO)
+    logging.getLogger('posttroll.message_broadcaster').setLevel(logging.INFO)
     logger = logging.getLogger("trollcast_client")
-
-
 
     times = args.times
 
@@ -74,22 +74,19 @@ if __name__ == '__main__':
         if times:
             start_time = datetime.strptime(times[0], "%Y%m%d%H%M%S")
             end_time = datetime.strptime(times[1], "%Y%m%d%H%M%S")
-            
+
             time_slice = slice(start_time, end_time)
             platform = " ".join(args.satellite[0].split("_")).upper()
             client.order(time_slice, platform, args.output)
         else:
             platforms = [" ".join(plat.split("_")).upper()
                          for plat in args.satellite]
-            
+
             client.get_all(platforms)
     except KeyboardInterrupt:
         pass
-    
+
     finally:
         client.stop()
         print ("Thanks for using pytroll/trollcast. "
                "See you soon on www.pytroll.org!")
-
-    
-
