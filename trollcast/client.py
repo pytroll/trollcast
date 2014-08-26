@@ -41,6 +41,7 @@ from posttroll.message import Message, strp_isoformat
 from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE
 import os.path
 from urlparse import urlunparse
+from trollsift import compose
 
 logger = logging.getLogger(__name__)
 
@@ -471,9 +472,9 @@ class HaveBuffer(Thread):
         cfg = ConfigParser()
         cfg.read(cfgfile)
         try:
-            self._out = cfg.get("local_reception", "output_dir")
+            self._out = cfg.get("local_reception", "output_file")
         except NoOptionError:
-            self._out = "."
+            self._out = "./{utctime:%Y%m%d%H%M%S}_{platform:4s}_{number:2s}.trollcast.hmf"
         localhost = cfg.get("local_reception", "localhost")
         self._hostname = cfg.get(localhost, "hostname")
         self._station = cfg.get("local_reception", "station")
@@ -679,9 +680,10 @@ class Client(HaveBuffer):
                                           or min(sat_lines[sat].keys()))
                             logger.info(sat +
                                         " seems to be inactive now, writing file.")
-                            filename = os.path.join(self._out,
-                                                    first_time.isoformat()
-                                                    + sat + ".hmf")
+                            fdict = {}
+                            fdict["platform"], fdict["number"] = sat.split()
+                            fdict["utctime"] = first_time
+                            filename = compose(self._out, fdict)
                             with open(filename, "wb") as fp_:
                                 for linetime in sorted(sat_lines[sat].keys()):
                                     fp_.write(sat_lines[sat][linetime])
