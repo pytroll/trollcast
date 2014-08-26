@@ -44,12 +44,18 @@ running both the client and the server.
   remotehosts=safe
   data=hrpt
   data_dir=/data/hrpt
-  file_pattern=*.temp
+  file_pattern={utctime:%Y%m%d%H%M%S}_{platform:4s}_{number:2s}.temp
   max_connections=2
   station=norrköping
   coordinates=16.148649 58.581844 0.02
   tle_files=/var/opt/2met/data/polar/orbitalelements/*.tle
-  
+  schedule_file=/var/opt/2met/data/polar/schedule/schedule.txt
+  schedule_format=scisys
+  mirror=my_receiver_server
+  output_file=/tmp/{utctime:%Y%m%d%H%M%S}_{platform:4s}_{number:2s}.trollcast.hmf
+  publisher=trollcast_receiver
+
+
   [safe]
   hostname=172.29.0.236
   pubport=9333
@@ -71,9 +77,9 @@ The `local_reception` section
    the moment.
  - `data_dir` is the place where streaming data from the reception station is
    written. 
- - `file_pattern` is the fnmatch pattern to use to detect the file that the
-   reception station writes to. Trollcast will watch this file to stream the
-   data to the network in real time.
+ - `file_pattern` is the pattern (trollsift syntax) to use to detect the file
+   that the reception station writes to. Trollcast will watch this file to
+   stream the data to the network in real time.
  - `max_connections` tells how many times the data can be sent. This is usefull
    for avoiding too many clients retrieving the data from the same server,
    putting unnecessary load on it. Instead, clients will spread the data among
@@ -83,6 +89,16 @@ The `local_reception` section
    satellite elevation. Lon/lats in degrees, altitude in kilometers.
  - `tle_dir`: directory holding the latest TLE data. Used for the computation
    of satellite elevation.
+ - `schedule_file`: schedule file to give trollcast server the knowledge of
+   passes to come.
+ - `schedule_format`: the format of the schedule file. Supported at the moment:
+   `scisys` and `kongsberg_metno`.
+ - `mirror`: the hostname or ip address of the trollcast server the current
+   server has to mirror.
+ - `output_file`: the file to write data to, in trollsift syntax.
+ - `publisher`: the name under which to publish new incoming files. If you don't
+   want to publish anything (which is usually the case when you don't have a
+   posttroll based trigger to handle messages), just omit this option.
 
 The host sections
 ~~~~~~~~~~~~~~~~~
@@ -168,6 +184,13 @@ Server
 ------
 
 .. automodule:: trollcast.server
+   :members:
+   :undoc-members:
+
+Schedule readers
+----------------
+
+.. automodule:: trollcast.schedules
    :members:
    :undoc-members:
 
