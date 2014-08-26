@@ -711,7 +711,7 @@ class Client(HaveBuffer):
                                               "file",
                                               to_send)
                                 logger.debug("publishing %s", str(msg))
-                                self._publisher.send(msg)
+                                self._publisher.send(str(msg))
 
                         except ValueError:
                             logger.info("Got no lines for " + sat)
