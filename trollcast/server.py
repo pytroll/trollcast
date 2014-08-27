@@ -942,8 +942,9 @@ def serve(configfile):
         else:
             pubport_m = cfg.getint(mirror, "pubport")
             reqport_m = cfg.getint(mirror, "reqport")
+            host_m = cfg.get(mirror, "hostname")
             mirror_watcher = MirrorWatcher(holder, context,
-                                           mirror, pubport_m, reqport_m,
+                                           host_m, pubport_m, reqport_m,
                                            sched)
             mirror_watcher.start()
 
