@@ -422,8 +422,6 @@ class _EventHandler(ProcessEvent):
 
         logger.debug("File modified! %s", event.pathname)
 
-        self._current_pass = self._schedule_reader.next_pass
-
         fname = os.path.basename(event.pathname)
 
         if not fnmatch(fname, globify(self._pattern)):
@@ -550,7 +548,7 @@ class MirrorWatcher(Thread):
             if message.type == "heartbeat":
                 logger.debug("Got heartbeat from " + str(self._pubaddress)
                              + ": " + str(message))
-                self._sched.next_pass = message.data["next_pass"]
+                self._sched.mirror_next_pass = message.data["next_pass"]
                 last_hb = datetime.now()
                 minutes = 2
 
@@ -723,6 +721,7 @@ class ScheduleReader(object):
         self._filename = filename
         self._fileformat = fileformat
         self.next_pass = None
+        self.mirror_next_pass = None
 
     def get_next_pass(self):
         """Get the next pass from the schedule
@@ -756,8 +755,13 @@ class Heart(Thread):
     def run(self):
         while self._loop:
             to_send = {}
-            to_send["next_pass"] = (self._schedule_reader.get_next_pass() or
-                                    str(self._schedule_reader.next_pass))
+            next_pass = self._schedule_reader.get_next_pass()
+            mirror_next_pass = self._schedule_reader.mirror_next_pass
+            if next_pass is None:
+                next_pass = mirror_next_pass
+            elif mirror_next_pass is not None:
+                next_pass = sorted((next_pass, mirror_next_pass))
+            to_send["next_pass"] = next_pass
             to_send["addr"] = self._address
             msg = Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
