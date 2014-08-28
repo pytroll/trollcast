@@ -315,6 +315,7 @@ class _EventHandler(ProcessEvent):
         self._timer = None
         self.sat = None
         self.time = None
+        self.current_event = None
 
         if self._schedule_reader.next_pass:
             next_pass_in = (self._schedule_reader.next_pass[0]
@@ -394,6 +395,11 @@ class _EventHandler(ProcessEvent):
             logger.debug("Ignoring %s", event.pathname)
             return False
 
+        if(self.current_event
+           and event.pathname != self.current_event.pathname):
+            self.clean_up(self.current_event)
+            self.current_event = event
+
         if self._fp is None:
             self._fp = open(event.pathname)
             self._current_pass = self._schedule_reader.next_pass
@@ -430,7 +436,8 @@ class _EventHandler(ProcessEvent):
             if qual > 0:
                 self._holder.add(sat, key, elevation, qual, data)
 
-    def process_IN_CLOSE_WRITE(self, event):
+    # def process_IN_CLOSE_WRITE(self, event):
+    def clean_up(self, event):
         """Clean up.
         """
         fname = os.path.basename(event.pathname)
