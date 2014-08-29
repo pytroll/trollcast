@@ -396,8 +396,9 @@ class _EventHandler(ProcessEvent):
             logger.debug("Ignoring %s", event.pathname)
             return False
 
-        if(self.current_event
-           and event.pathname != self.current_event.pathname):
+        if self.current_event is None:
+            self.current_event = event
+        elif(event.pathname != self.current_event.pathname):
             self.clean_up(self.current_event)
             self.current_event = event
 
