@@ -197,7 +197,8 @@ class HRPT(object):
                         "Looks like we lost some scanlines, adjusting %s counts.", seconds * 6.0)
 
                     self.count += int(max(self.lags) * 6.0)
-                    self.time_threshold = timedelta(seconds=15)
+                    self.time_threshold = max(timedelta(seconds=15),
+                                              self.time_threshold)
                     self.reftimes = []
                     self.lags = [0]
 
