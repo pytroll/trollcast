@@ -599,6 +599,11 @@ def compute_line_times(utctime, start_time, end_time):
     return linepos
 
 
+true_names = {"NOAA 19": "NOAA-19",
+              "NOAA 18": "NOAA-18",
+              "NOAA 15": "NOAA-15"}
+
+
 class Client(HaveBuffer):
 
     """The client class.
@@ -689,11 +694,11 @@ class Client(HaveBuffer):
                                     fp_.write(sat_lines[sat][linetime])
                             if self._publisher:
                                 to_send = {}
-                                to_send["satellite"] = sat
+                                to_send["platform_name"] = true_names[sat]
                                 to_send["format"] = "HRPT"
                                 to_send["start_time"] = first_time
-                                to_send["level"] = "0"
-                                to_send["filename"] = os.path.basename(
+                                to_send["data_processing_level"] = "0"
+                                to_send["uid"] = os.path.basename(
                                     filename)
                                 fullname = os.path.realpath(filename)
                                 to_send["uri"] = urlunparse(("ssh",
@@ -702,9 +707,17 @@ class Client(HaveBuffer):
                                                              "",
                                                              "",
                                                              ""))
-                                to_send["instrument"] = ["avhrr/3",
+                                if sat == "NOAA 15":
+                                    to_send["sensor"] = ("avhrr/3",
+                                                         "amsu-a",
+                                                         "amsu-b",
+                                                         "hirs/3")
+                                elif sat in ["NOAA 19", "NOAA 18"]:
+                                    to_send["sensor"] = ("avhrr/3",
                                                          "mhs",
-                                                         "amsu"]
+                                                         "amsu-a",
+                                                         "hirs/4")
+
                                 to_send["type"] = "binary"
                                 msg = Message("/".join(("",
                                                         to_send["format"],
