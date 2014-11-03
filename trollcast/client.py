@@ -719,12 +719,14 @@ class Client(HaveBuffer):
                                                          "hirs/4")
 
                                 to_send["type"] = "binary"
-                                msg = Message("/".join(("",
-                                                        to_send["format"],
-                                                        to_send["level"],
-                                                        self._station)),
-                                              "file",
-                                              to_send)
+                                msg = Message("/".join(
+                                    ("",
+                                     to_send["format"],
+                                     to_send[
+                                         "data_processing_level"],
+                                     self._station)),
+                                    "file",
+                                    to_send)
                                 logger.debug("publishing %s", str(msg))
                                 self._publisher.send(str(msg))
 
