@@ -311,6 +311,7 @@ class Requester(object):
         self.connect()
         self.blocked = False
         self.lock = Lock()
+        self.failures = 0
 
     def reset_connection(self):
         """Reset the socket
@@ -369,6 +370,7 @@ class Requester(object):
                             "Got reply: " + " ".join(str(rep).split()[:6]))
                     else:
                         logger.debug("Got reply: " + str(rep))
+                    self.failures = 0
                     return Message(rawstr=reply)
                 else:
                     logger.warning("Timeout from tcp://" + self._host + ":"
@@ -379,6 +381,10 @@ class Requester(object):
                         logger.error("Server doesn't answer, abandoning... " +
                                      "tcp://" + self._host + ":" + str(self._port))
                         self.connect()
+                        self.failures += 1
+                        if self.failures == 5:
+                            logger.critical("Server jammed ? %s",
+                                            self._host)
                         return
                     logger.info("Reconnecting and resending " + str(msg))
                     self.connect()

@@ -53,11 +53,17 @@ if __name__ == '__main__':
     else:
         ch1 = logging.StreamHandler()
     ch1.setLevel(logging.DEBUG)
-
+    ch2 = logging.handlers.SMTPHandler("localhost", "martin.raspaud@smhi.se",
+                                       ["martin.raspaud@smhi.se",
+                                           "janne.kotro@fmi.fi"],
+                                       "Trollcast client problem")
+    ch2.setLevel(logging.CRITICAL)
     formatter = logging.Formatter(
         '[%(levelname)s %(name)s %(asctime)s] %(message)s')
     ch1.setFormatter(formatter)
+    ch2.setFormatter(formatter)
     logging.getLogger('').addHandler(ch1)
+    logging.getLogger('').addHandler(ch2)
     if args.verbose:
         logging.getLogger('').setLevel(logging.DEBUG)
     else:
