@@ -145,7 +145,7 @@ class HRPT(object):
         self.sat = sat
         self.reftime = reftime
         self.count = 0
-        self.time_threshold = timedelta(seconds=300)
+        self.time_threshold = timedelta(seconds=600)
         self.reftimes = []
         self.last_time = None
         self.lags = [0]
@@ -159,7 +159,6 @@ class HRPT(object):
 
         for i, line in enumerate(np.fromstring(data, dtype=self.dtype,
                                                count=len(data) / self.line_size)):
-
             days = self.timecode(line["timecode"])
             utctime = datetime(year, 1, 1) + days
 
@@ -202,28 +201,33 @@ class HRPT(object):
                     self.reftimes = []
                     self.lags = [0]
 
-            # Check if scanline is within expected range
-            if (abs(utctime - (self.reftime + timedelta(seconds=self.count / 6.0)))
-                    > self.time_threshold):
-                logger.debug("Spurious time for scanline %s (should be %s)",
-                             str(utctime),
-                             str((self.reftime + timedelta(seconds=self.count / 6.0))))
-                qual = 0
-
             # Adjust reference time upon good quality scanlines
-            if qual >= 95:
+            if qual >= 100:
                 # adjusting reftime:
                 self.reftimes.append(
                     utctime - timedelta(seconds=self.count / 6.0))
                 if (len(self.reftimes) > 50 and
                         self.time_threshold > timedelta(milliseconds=50)):
                     old_ref = self.reftime
-                    self.reftime = sorted(
-                        self.reftimes)[len(self.reftimes) / 2]
+
+                    hist, boundaries = np.histogram([time.mktime(reftime.timetuple())
+                                                     for reftime in self.reftimes],
+                                                    100)
+                    idx = np.argmax(hist)
+                    self.reftime = datetime.fromtimestamp(
+                        (boundaries[idx] + boundaries[idx + 1]) / 2)
                     self.time_threshold = timedelta(milliseconds=50)
                     logger.info("Setting up new reftime %s (was %s)",
                                 str(self.reftime),
                                 str(old_ref))
+            elif (abs(utctime - (self.reftime +
+                                 timedelta(seconds=self.count / 6.0)))
+                    > self.time_threshold):
+                # Check if scanline is within expected range
+                logger.debug("Spurious time for scanline %s (should be %s)",
+                             str(utctime),
+                             str((self.reftime + timedelta(seconds=self.count / 6.0))))
+                qual = 0
 
             self.count += 1
             self.last_time = new_time
