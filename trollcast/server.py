@@ -31,6 +31,7 @@ from ConfigParser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
 from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
+from posttroll import context
 from pyorbital.orbital import Orbital
 import logging
 import time
@@ -512,13 +513,13 @@ class MirrorWatcher(Thread):
     """Watches a other server.
     """
 
-    def __init__(self, holder, context, host, pubport, reqport, sched):
+    def __init__(self, holder, host, pubport, reqport, sched):
         Thread.__init__(self)
         self._holder = holder
         self._pubaddress = "tcp://" + host + ":" + str(pubport)
         self._reqaddress = "tcp://" + host + ":" + str(reqport)
 
-        self._req = SimpleRequester(host, reqport, context)
+        self._req = SimpleRequester(host, reqport)
 
         self._subsocket = context.socket(SUB)
         self._subsocket.connect(self._pubaddress)
@@ -692,9 +693,8 @@ class Publisher(object):
     """Publish stuff.
     """
 
-    def __init__(self, context, port):
-        self._context = context
-        self._socket = self._context.socket(PUB)
+    def __init__(self, port):
+        self._socket = context.socket(PUB)
         self._socket.bind("tcp://*:" + str(port))
         self._lock = Lock()
 
@@ -786,7 +786,7 @@ class RequestManager(Thread):
     """Manage requests.
     """
 
-    def __init__(self, holder, context, port, station):
+    def __init__(self, holder, port, station):
         Thread.__init__(self)
 
         self._holder = holder
@@ -888,8 +888,6 @@ def serve(configfile):
     """Serve forever.
     """
 
-    context = Context()
-
     try:
         cfg = ConfigParser()
         cfg.read(configfile)
@@ -914,7 +912,7 @@ def serve(configfile):
 
         # publisher
         pubport = cfg.getint(host, "pubport")
-        pub = Publisher(context, pubport)
+        pub = Publisher(pubport)
 
         # schedule reader
         try:
@@ -961,14 +959,14 @@ def serve(configfile):
             pubport_m = cfg.getint(mirror, "pubport")
             reqport_m = cfg.getint(mirror, "reqport")
             host_m = cfg.get(mirror, "hostname")
-            mirror_watcher = MirrorWatcher(holder, context,
+            mirror_watcher = MirrorWatcher(holder,
                                            host_m, pubport_m, reqport_m,
                                            sched)
             mirror_watcher.start()
 
         # request manager
         reqport = cfg.getint(host, "reqport")
-        reqman = RequestManager(holder, context, reqport, station)
+        reqman = RequestManager(holder, reqport, station)
         reqman.start()
 
         while True:

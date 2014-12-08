@@ -38,10 +38,12 @@ from threading import Thread, Timer, Event, Lock
 from urlparse import urlsplit
 import numpy as np
 from posttroll.message import Message, strp_isoformat
+from posttroll import context
 from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE
 import os.path
 from urlparse import urlunparse
 from trollsift import compose
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,6 @@ LINE_SIZE = 11090 * 2
 CLIENT_TIMEOUT = timedelta(seconds=45)
 REQ_TIMEOUT = 1000
 BUFFER_TIME = 2.0
-context = Context()
 
 
 class Subscriber(object):
@@ -235,83 +236,30 @@ class SimpleRequester(object):
     """Base requester class.
     """
 
-    def __init__(self, host, port, reqcontext):
-        self._context = reqcontext
+    request_retries = 3
+
+    def __init__(self, host, port):
         self._socket = None
         self._reqaddress = "tcp://" + host + ":" + str(port)
         self._poller = Poller()
         self._lock = Lock()
-        self.request_retries = 3
+        self.failures = 0
 
         self.connect()
 
     def connect(self):
         """Connect to the server
         """
-        self._socket = self._context.socket(REQ)
+        self._socket = context.socket(REQ)
         self._socket.connect(self._reqaddress)
         self._poller.register(self._socket, POLLIN)
 
     def stop(self):
         """Close the connection to the server
         """
-        self._poller.unregister(self._socket)
         self._socket.setsockopt(LINGER, 0)
         self._socket.close()
-
-    def send_and_recv(self, msg, timeout=None):
-        """Sending *msg* and returning the reply. This function retries in case
-        of timeouts.
-        """
-        logger.debug("Requesting: " + str(msg))
-        with self._lock:
-            retries_left = self.request_retries
-            self._socket.send(str(msg))
-
-            while retries_left:
-                socks = dict(self._poller.poll(timeout))
-                if socks.get(self._socket) == POLLIN:
-                    reply = self._socket.recv()
-                    rep = Message(rawstr=reply)
-                    if rep.binary:
-                        logger.debug("Got reply: "
-                                     + " ".join(str(rep).split()[:6]))
-                    else:
-                        logger.debug("Got reply: " + str(rep))
-                    return Message(rawstr=reply)
-                else:
-                    logger.warning("Timeout from " + str(self._reqaddress)
-                                   + ", retrying...")
-                    self.stop()
-                    retries_left -= 1
-                    if retries_left == 0:
-                        logger.error("Server doesn't answer, abandoning... " +
-                                     str(self._reqaddress))
-                        self.connect()
-                        return
-                    logger.info("Reconnecting and resending " + str(msg))
-                    self.connect()
-                    self._socket.send(str(msg))
-
-
-class Requester(object):
-
-    """Make a request connection, waiting to get scanlines .
-    """
-
-    request_retries = 3
-
-    def __init__(self, host, port, station, pubport=None):
-        self._host = host
-        self._port = port
-        self._station = station
-        self._pubport = pubport
-        self._poller = Poller()
-        self._socket = None
-        self.connect()
-        self.blocked = False
-        self.lock = Lock()
-        self.failures = 0
+        self._poller.unregister(self._socket)
 
     def reset_connection(self):
         """Reset the socket
@@ -319,76 +267,82 @@ class Requester(object):
         self.stop()
         self.connect()
 
-    def connect(self):
-        """Connect the socket.
-        """
-        self._socket = context.socket(REQ)
-        self._socket.connect("tcp://" + self._host + ":" + str(self._port))
-        self._poller.register(self._socket, POLLIN)
-
-    def stop(self):
-        """Close the socket.
-        """
-        self._poller.unregister(self._socket)
-        self._socket.setsockopt(LINGER, 0)
-        self._socket.close()
-
     def __del__(self, *args, **kwargs):
         self.stop()
 
-    def send(self, msg):
-        """Send a message.
-        """
-        return self._socket.send(str(msg))
+    def send_and_recv(self, msg, timeout=2500):
 
-    def recv(self, timeout=None):
-        """Receive a message. *timeout* in ms.
-        """
-        if self._poller.poll(timeout):
-            self.blocked = False
-            return Message(rawstr=self._socket.recv())
-        else:
-            raise IOError("Timeout from " + str(self._host) +
-                          ":" + str(self._port))
-
-    def send_and_recv(self, msg, timeout=None):
-        """Sending *msg* and returning the reply. This function retries in case
-        of timeouts.
-        """
-        logger.debug("Requesting: " + str(msg))
-        with self.lock:
+        logger.debug("Locking and requesting: " + str(msg))
+        with self._lock:
             retries_left = self.request_retries
-            self._socket.send(str(msg))
+            request = str(msg)
+            self._socket.send(request)
 
             while retries_left:
                 socks = dict(self._poller.poll(timeout))
                 if socks.get(self._socket) == POLLIN:
                     reply = self._socket.recv()
+                    if not reply:
+                        logger.error("Empty reply!")
+                        break
                     rep = Message(rawstr=reply)
                     if rep.binary:
-                        logger.debug(
-                            "Got reply: " + " ".join(str(rep).split()[:6]))
+                        logger.debug("Got reply: "
+                                     + " ".join(str(rep).split()[:6]))
                     else:
                         logger.debug("Got reply: " + str(rep))
-                    self.failures = 0
-                    return Message(rawstr=reply)
+
+                    return rep
                 else:
-                    logger.warning("Timeout from tcp://" + self._host + ":"
-                                   + str(self._port) + ", retrying...")
+                    logger.warning("Timeout from " + str(self._reqaddress)
+                                   + ", retrying...")
+                    # Socket is confused. Close and remove it.
                     self.stop()
                     retries_left -= 1
                     if retries_left == 0:
                         logger.error("Server doesn't answer, abandoning... " +
-                                     "tcp://" + self._host + ":" + str(self._port))
+                                     str(self._reqaddress))
                         self.connect()
                         self.failures += 1
                         if self.failures == 5:
                             logger.critical("Server jammed ? %s",
-                                            self._host)
+                                            self._reqaddress)
                         return
                     logger.info("Reconnecting and resending " + str(msg))
+                    # Create new connection
                     self.connect()
-                    self._socket.send(str(msg))
+                    self._socket.send(request)
+        logger.debug("Release lock")
+
+
+class Requester(SimpleRequester):
+
+    """Make a request connection, waiting to get scanlines .
+    """
+
+    def __init__(self, host, port, station, pubport=None):
+        SimpleRequester.__init__(self, host, port)
+        self._station = station
+        self._pubport = pubport
+        self.blocked = False
+
+    def send(self, msg):
+        """Send a message.
+        """
+        warnings.warn("Send method of Requester is deprecated",
+                      DeprecationWarning)
+        return self._socket.send(str(msg))
+
+    def recv(self, timeout=None):
+        """Receive a message. *timeout* in ms.
+        """
+        warnings.warn("Recv method of Requester is deprecated",
+                      DeprecationWarning)
+        if self._poller.poll(timeout):
+            self.blocked = False
+            return Message(rawstr=self._socket.recv())
+        else:
+            raise IOError("Timeout from " + str(self._reqaddress))
 
     def ping(self):
         """Send a ping.
