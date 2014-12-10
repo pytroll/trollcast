@@ -867,7 +867,7 @@ class RequestManager(Thread):
                                          " when processing the request:")
                     finally:
                         self.send(reply)
-                logger.debug("Lock released")
+                logger.debug("Lock released from manager")
             else:  # timeout
                 pass
 

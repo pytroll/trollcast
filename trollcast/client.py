@@ -39,7 +39,7 @@ from urlparse import urlsplit
 import numpy as np
 from posttroll.message import Message, strp_isoformat
 from posttroll import context
-from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE
+from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE, VERSION_MAJOR
 import os.path
 from urlparse import urlunparse
 from trollsift import compose
@@ -54,7 +54,10 @@ logger = logging.getLogger(__name__)
 LINES_PER_SECOND = 6
 LINE_SIZE = 11090 * 2
 CLIENT_TIMEOUT = timedelta(seconds=45)
+
 REQ_TIMEOUT = 1000
+if VERSION_MAJOR < 3:
+    REQ_TIMEOUT *= 1000
 BUFFER_TIME = 2.0
 
 
@@ -244,6 +247,7 @@ class SimpleRequester(object):
         self._poller = Poller()
         self._lock = Lock()
         self.failures = 0
+        self.jammed = False
 
         self.connect()
 
@@ -270,14 +274,14 @@ class SimpleRequester(object):
     def __del__(self, *args, **kwargs):
         self.stop()
 
-    def send_and_recv(self, msg, timeout=2500):
+    def send_and_recv(self, msg, timeout=REQ_TIMEOUT):
 
         logger.debug("Locking and requesting: " + str(msg))
         with self._lock:
             retries_left = self.request_retries
             request = str(msg)
             self._socket.send(request)
-
+            rep = None
             while retries_left:
                 socks = dict(self._poller.poll(timeout))
                 if socks.get(self._socket) == POLLIN:
@@ -291,8 +295,9 @@ class SimpleRequester(object):
                                      + " ".join(str(rep).split()[:6]))
                     else:
                         logger.debug("Got reply: " + str(rep))
-
-                    return rep
+                    self.failures = 0
+                    self.jammed = False
+                    break
                 else:
                     logger.warning("Timeout from " + str(self._reqaddress)
                                    + ", retrying...")
@@ -307,12 +312,14 @@ class SimpleRequester(object):
                         if self.failures == 5:
                             logger.critical("Server jammed ? %s",
                                             self._reqaddress)
-                        return
+                            self.jammed = True
+                        break
                     logger.info("Reconnecting and resending " + str(msg))
                     # Create new connection
                     self.connect()
                     self._socket.send(request)
-        logger.debug("Release lock")
+        logger.debug("Release request lock")
+        return rep
 
 
 class Requester(SimpleRequester):
@@ -613,20 +620,31 @@ class Client(HaveBuffer):
                     logger.debug("Picking line " + " ".join([str(utctime),
                                                              str(senders)]))
                     # choose the highest elevation and quality
-                    sender, elevation, quality = max(senders,
-                                                     key=(lambda x: (x[2],
-                                                                     x[1])))
+                    # sender, elevation, quality = max(senders,
+                    #                                  key=(lambda x: (x[2],
+                    #                                                  x[1])))
+                    sender_elevation_quality = sorted(senders,
+                                                      key=(lambda x: (x[2],
+                                                                      x[1])))
+                    best_req = None
+                    for sender, elevation, quality in reversed(sender_elevation_quality):
+                        best_req = self._requesters[sender.split(":")[0]]
+                        if not best_req.jammed:
+                            break
+                    if best_req is None:
+                        logger.debug("No working connection, could not retrieve"
+                                     " line %s", str(utctime))
+                        continue
                     sat_last_seen[sat] = datetime.utcnow(), elevation
                     logger.debug("requesting " +
                                  " ".join([str(sat), str(utctime),
                                            str(sender), str(elevation)]))
                     # TODO: this should be parallelized, and timed. In case of
                     # failure, another source should be used. Choking ?
-                    line = self._requesters[sender.split(":")[0]].get_line(sat,
-                                                                           utctime)
+                    line = best_req.get_line(sat, utctime)
                     if line is None:
-                        logger.warning(
-                            "Could not retrieve line " + str(utctime))
+                        logger.warning("Could not retrieve line %s",
+                                       str(utctime))
                     else:
                         sat_lines[sat][utctime] = line
                         if first_time is None and quality == 100:
