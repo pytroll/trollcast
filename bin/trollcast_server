@@ -59,6 +59,7 @@ if __name__ == '__main__':
     LOG = logging.getLogger("")
 
     class MyFormatter(logging.Formatter):
+
         """New formatter with milliseconds
         """
         converter = datetime.fromtimestamp
@@ -74,8 +75,8 @@ if __name__ == '__main__':
                 s__ = "%s.%03d" % (t__, record.msecs)
             return s__
 
-
-    formatter = MyFormatter('[ %(levelname)s %(name)s %(asctime)s] %(message)s')
+    formatter = MyFormatter(
+        '[ %(levelname)s %(name)s %(asctime)s] %(message)s')
     ch1.setFormatter(formatter)
     LOG.addHandler(ch1)
 
@@ -83,15 +84,14 @@ if __name__ == '__main__':
         ch1 = logging.handlers.SMTPHandler("localhost",
                                            "trollcast@localhost",
                                            [args.mail],
-                                           "Trollcast Error")
-        ch1.setLevel(logging.ERROR)
+                                           "Trollcast Server Error")
+        ch1.setLevel(logging.CRITICAL)
         ch1.setFormatter(formatter)
         LOG.addHandler(ch1)
-    
+
     LOG = logging.getLogger("trollcast_server")
 
     try:
         serve(args.config_file)
     finally:
         print "Thanks for using pytroll/trollcast. See you soon on www.pytroll.org!"
-
