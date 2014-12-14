@@ -462,7 +462,7 @@ class _EventHandler(ProcessEvent):
         except KeyError:
             logger.info("No reader defined for %s", str(event.pathname))
 
-from trollcast.client import SimpleRequester
+from trollcast.client import SimpleRequester, REQ_TIMEOUT
 
 
 class _MirrorGetter(object):
@@ -488,7 +488,7 @@ class _MirrorGetter(object):
                          {"type": "scanline",
                           "satellite": self._sat,
                           "utctime": self._key})
-        rep = self._req.send_and_recv(str(reqmsg), 300)
+        rep = self._req.send_and_recv(str(reqmsg), REQ_TIMEOUT)
 
         if rep and rep.data:
             self._data = rep.data
@@ -499,7 +499,7 @@ class _MirrorGetter(object):
         return self._data
 
     def __str__(self):
-        return self.get_data()
+        return str(self.get_data())
 
     def __add__(self, other):
         return str(self) + other

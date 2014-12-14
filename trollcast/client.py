@@ -304,7 +304,7 @@ class SimpleRequester(object):
                     # Socket is confused. Close and remove it.
                     self.stop()
                     retries_left -= 1
-                    if retries_left == 0:
+                    if retries_left <= 0:
                         logger.error("Server doesn't answer, abandoning... " +
                                      str(self._reqaddress))
                         self.connect()
