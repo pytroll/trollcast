@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012, 2013, 2014 SMHI
+# Copyright (c) 2012, 2013, 2014, 2015 SMHI
 
 # Author(s):
 
@@ -39,7 +39,7 @@ from urlparse import urlsplit
 import numpy as np
 from posttroll.message import Message, strp_isoformat
 from posttroll import context
-from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE, VERSION_MAJOR
+from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE, zmq_version
 import os.path
 from urlparse import urlunparse
 from trollsift import compose
@@ -56,7 +56,7 @@ LINE_SIZE = 11090 * 2
 CLIENT_TIMEOUT = timedelta(seconds=45)
 
 REQ_TIMEOUT = 1000
-if VERSION_MAJOR < 3:
+if zmq_version().startswith("2."):
     REQ_TIMEOUT *= 1000
 BUFFER_TIME = 2.0
 
