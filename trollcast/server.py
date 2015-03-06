@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2014 Martin Raspaud
+# Copyright (c) 2014, 2015 Martin Raspaud
 
 # Author(s):
 
@@ -322,6 +322,7 @@ class _EventHandler(ProcessEvent):
         self.sat = None
         self.time = None
         self.current_event = None
+        self._current_pass_timer = None
 
         if self._schedule_reader.next_pass:
             next_pass_in = (self._schedule_reader.next_pass[0]
@@ -332,10 +333,13 @@ class _EventHandler(ProcessEvent):
                                     ["Reception expected but not started"])
                 self._timer.start()
 
-    def start_receiving(self):
+    def start_receiving(self, event):
         self._receiving = True
         if self._timer is not None:
             self._timer.cancel()
+        if self._current_pass_timer is not None:
+            self._current_pass_timer.cancel()
+        self._current_pass_timer = Timer(60, self.clean_up, event)
 
     def stop_receiving(self):
         self._receiving = False
@@ -417,7 +421,7 @@ class _EventHandler(ProcessEvent):
             except KeyError:
                 logger.info("Could not retrieve satellite name from filename")
 
-        self.start_receiving()
+        self.start_receiving(event)
         return self._fp is not None
 
     def process_IN_MODIFY(self, event):
@@ -434,7 +438,7 @@ class _EventHandler(ProcessEvent):
         if not fnmatch(fname, globify(self._pattern)):
             return
 
-        self.start_receiving()
+        self.start_receiving(event)
 
         for sat, key, elevation, qual, data in self._reader(event.pathname,
                                                             self._current_pass):
