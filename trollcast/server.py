@@ -169,7 +169,7 @@ class HRPT(object):
 
             qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
                     np.sum(line['frame_sync'] == self.hrpt_sync_start))
-            qual = (100 * qual) / 106
+            qual = 100 * (qual / 106.0)
 
             qual -= np.sum(abs(np.diff(line['image_data']
                                        [:, 4].astype(np.int16))) > 200)
@@ -203,7 +203,7 @@ class HRPT(object):
                     self.lags = [0]
 
             # Adjust reference time upon good quality scanlines
-            if qual >= 100:
+            if qual >= 99.9:
                 # adjusting reftime:
                 self.reftimes.append(
                     utctime - timedelta(seconds=self.count / 6.0))
@@ -716,6 +716,8 @@ class Holder(object):
         to_send["elevation"] = elevation
         to_send["quality"] = qual
         to_send["origin"] = self._origin
+        logger.info(str(to_send))
+
         msg = Message(subject, "have", to_send).encode()
         self._pub.send(msg)
 
