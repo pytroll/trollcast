@@ -628,7 +628,7 @@ class Client(HaveBuffer):
                     #                                                  x[1])))
                     sender_elevation_quality = sorted(senders,
                                                       key=(lambda x: (x[2],
-                                                                      x[3],
+                                                                      -x[3],
                                                                       x[1])))
                     best_req = None
                     for sender, elevation, quality, ping_time in reversed(sender_elevation_quality):
