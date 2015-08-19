@@ -509,7 +509,7 @@ class HaveBuffer(Thread):
                     # Since append is atomic in CPython, this should work.
                     # However, if it is not, then this is not thread safe.
                     self.scanlines[sat][utctime].append((sender, elevation,
-                                                         quality))
+                                                         quality, self._ping_times.get(senderhost, 3600000)))
                     if (len(self.scanlines[sat][utctime]) ==
                             len(self._requesters)):
                         self.send_to_queues(sat, utctime)
