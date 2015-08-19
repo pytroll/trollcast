@@ -449,6 +449,7 @@ class HaveBuffer(Thread):
         self._queues = []
         self._requesters = {}
         self._timers = {}
+        self._ping_times = {}
 
     def add_queue(self, queue):
         """Adds a queue to dispatch have messages to
@@ -480,7 +481,8 @@ class HaveBuffer(Thread):
                 sat = message.data["satellite"]
                 utctime = strp_isoformat(message.data["timecode"])
                 # This should take care of address translation.
-                sender = (message.sender.split("@")[1] + ":" +
+                senderhost = message.sender.split("@")[1]
+                sender = (senderhost + ":" +
                           message.data["origin"].split(":")[1])
                 elevation = message.data["elevation"]
                 try:
@@ -490,7 +492,7 @@ class HaveBuffer(Thread):
                 self.scanlines.setdefault(sat, {})
                 if utctime not in self.scanlines[sat]:
                     self.scanlines[sat][utctime] = [
-                        (sender, elevation, quality)]
+                        (sender, elevation, quality, self._ping_times.get(senderhost, 3600000))]
                     # TODO: This implies that we always wait BUFFER_TIME before
                     # sending to queue. In the case were the "have" messages of
                     # all servers were sent in less time, we should not be
@@ -530,6 +532,7 @@ class HaveBuffer(Thread):
                         else:
                             rtime = (rtime.seconds * 1000 +
                                      rtime.microseconds / 1000.0)
+                            self._ping_times[senderhost] = rtime
                             logger.debug("ping roundtrip to " + rstation +
                                          ": " + str(rtime) +
                                          "ms")
@@ -625,6 +628,7 @@ class Client(HaveBuffer):
                     #                                                  x[1])))
                     sender_elevation_quality = sorted(senders,
                                                       key=(lambda x: (x[2],
+                                                                      x[3],
                                                                       x[1])))
                     best_req = None
                     for sender, elevation, quality in reversed(sender_elevation_quality):
