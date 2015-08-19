@@ -631,7 +631,7 @@ class Client(HaveBuffer):
                                                                       x[3],
                                                                       x[1])))
                     best_req = None
-                    for sender, elevation, quality in reversed(sender_elevation_quality):
+                    for sender, elevation, quality, ping_time in reversed(sender_elevation_quality):
                         best_req = self._requesters[sender.split(":")[0]]
                         if not best_req.jammed:
                             break
