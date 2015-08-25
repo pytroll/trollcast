@@ -795,13 +795,16 @@ class Heart(Thread):
     def run(self):
         while self._loop:
             to_send = {}
+            keys = ("start_time", "platform_name", "end_time")
             next_pass = self._schedule_reader.get_next_pass()
             mirror_next_pass = self._schedule_reader.mirror_next_pass
-            if next_pass is None:
-                next_pass = mirror_next_pass
-            elif mirror_next_pass is not None:
-                next_pass = sorted((next_pass, mirror_next_pass))
-            to_send["next_pass"] = next_pass
+            passes = []
+            if next_pass is not None:
+                passes.append(dict(zip(keys, next_pass)))
+            if mirror_next_pass is not None:
+                passes.extend(mirror_next_pass)
+            if passes:
+                to_send["next_pass"] = sorted(passes, key=(lambda x: x["start_time"]))
             to_send["addr"] = self._address
             msg = Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
@@ -1078,8 +1081,6 @@ if __name__ == '__main__':
     for truc in hrpt.read(lines):
         print truc[0][:4]
         # raw_input()
-
-    pause
 
     try:
         serve(sys.argv[1])
