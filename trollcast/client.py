@@ -633,26 +633,29 @@ class Client(HaveBuffer):
                     best_req = None
                     for sender, elevation, quality, ping_time in reversed(sender_elevation_quality):
                         best_req = self._requesters[sender.split(":")[0]]
-                        if not best_req.jammed:
+                        if best_req.jammed:
+                            continue
+                        sat_last_seen[sat] = datetime.utcnow(), elevation
+                        logger.debug("requesting " +
+                                     " ".join([str(sat), str(utctime),
+                                               str(sender), str(elevation)]))
+                        # TODO: this should be parallelized, and timed. In case of
+                        # failure, another source should be used. Choking ?
+                        line = best_req.get_line(sat, utctime)
+                        if line is None:
+                            logger.warning("Could not retrieve line %s",
+                                           str(utctime))
+                        else:
+                            sat_lines[sat][utctime] = line
+                            if first_time is None and quality == 100:
+                                first_time = utctime
                             break
+
                     if best_req is None:
                         logger.debug("No working connection, could not retrieve"
                                      " line %s", str(utctime))
                         continue
-                    sat_last_seen[sat] = datetime.utcnow(), elevation
-                    logger.debug("requesting " +
-                                 " ".join([str(sat), str(utctime),
-                                           str(sender), str(elevation)]))
-                    # TODO: this should be parallelized, and timed. In case of
-                    # failure, another source should be used. Choking ?
-                    line = best_req.get_line(sat, utctime)
-                    if line is None:
-                        logger.warning("Could not retrieve line %s",
-                                       str(utctime))
-                    else:
-                        sat_lines[sat][utctime] = line
-                        if first_time is None and quality == 100:
-                            first_time = utctime
+
 
                 except Empty:
                     pass
