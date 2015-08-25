@@ -622,10 +622,7 @@ class Client(HaveBuffer):
 
                     logger.debug("Picking line " + " ".join([str(utctime),
                                                              str(senders)]))
-                    # choose the highest elevation and quality
-                    # sender, elevation, quality = max(senders,
-                    #                                  key=(lambda x: (x[2],
-                    #                                                  x[1])))
+                    # choose the highest quality, lowest ping time, highest elevation.
                     sender_elevation_quality = sorted(senders,
                                                       key=(lambda x: (x[2],
                                                                       -x[3],
@@ -640,7 +637,7 @@ class Client(HaveBuffer):
                                      " ".join([str(sat), str(utctime),
                                                str(sender), str(elevation)]))
                         # TODO: this should be parallelized, and timed. In case of
-                        # failure, another source should be used. Choking ?
+                        # TODO: Choking ?
                         line = best_req.get_line(sat, utctime)
                         if line is None:
                             logger.warning("Could not retrieve line %s",
@@ -668,6 +665,7 @@ class Client(HaveBuffer):
                         try:
                             first_time = (first_time
                                           or min(sat_lines[sat].keys()))
+                            last_time = max(sat_lines[sat].keys())
                             logger.info(sat +
                                         " seems to be inactive now, writing file.")
                             fdict = {}
@@ -682,6 +680,7 @@ class Client(HaveBuffer):
                                 to_send["platform_name"] = true_names[sat]
                                 to_send["format"] = "HRPT"
                                 to_send["start_time"] = first_time
+                                to_send["end_time"] = last_time
                                 to_send["data_processing_level"] = "0"
                                 to_send["uid"] = os.path.basename(
                                     filename)
