@@ -31,7 +31,7 @@ def suite():
     """
     mysuite = unittest.TestSuite()
     mysuite.addTests(test_server.suite())
-    mysuite.addTests(test_client.suite())
+    #mysuite.addTests(test_client.suite())
 
 
     return mysuite

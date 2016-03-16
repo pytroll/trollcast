@@ -58,5 +58,5 @@ setup(name="trollcast",
       ],
       #extras_require={ 'daemon': ['python-daemon'],}
       test_suite='trollcast.tests.suite',
-      test_requires=['mock']
+      tests_require=['mock']
       )

@@ -56,7 +56,7 @@ class TestHeart(unittest.TestCase):
         time.sleep(0.1)
         msg = self.pub.send.call_args[0][0]
         self.assertTrue(msg.startswith('pytroll://oper/polar/direct_readout/bla heartbeat '))
-        self.assertTrue(msg.endswith(' v1.01 application/json {"next_pass_time": "unknown", "addr": "hej"}'))
+        self.assertTrue(msg.endswith(' v1.01 application/json {"start_time": "unknown", "addr": "hej"}'))
         self.assertEquals(self.pub.send.call_count, 1)
 
 
@@ -69,19 +69,6 @@ class TestPublisher(unittest.TestCase):
         self.context.socket = MagicMock(name="socket_fun",
                                         return_value=self.socket)
 
-    def test_publisher(self):
-        """Test the publisher
-        """
-
-        port = int(random.uniform(1024, 65536))
-
-        pub = server.Publisher(self.context, port)
-        self.assertEquals(self.context.socket.call_count, 1)
-        self.socket.bind.assert_called_once_with("tcp://*:" + str(port))
-        pub.send("hej")
-        self.socket.send.assert_called_once_with("hej")
-        pub.stop()
-        self.assertEquals(self.socket.close.call_count, 1)
 
     def test_race_conditions(self):
         """Test the race conditions in the send function
@@ -93,7 +80,7 @@ class TestPublisher(unittest.TestCase):
         context = MagicMock()
         context.socket.return_value.send = MagicMock(side_effect=wait)
         port = int(random.uniform(1024, 65536))
-        pub = server.Publisher(context, port)
+        pub = server.Publisher(port)
         thr = Thread(target=pub.send, args=["send 1"])
         thr.start()
         time.sleep(0.05)
@@ -159,10 +146,9 @@ class TestRequestManager(unittest.TestCase):
         self.station = MagicMock()
 
         self.reqman = server.RequestManager(self.holder,
-                                            self.context,
                                             self.port,
                                             self.station)
-
+        self.reqman._socket = self.context.socket.return_value
 
     def test_start_stop(self):
         """Test start and stop of ReqMan
@@ -204,12 +190,6 @@ class TestRequestManager(unittest.TestCase):
         server.Message.assert_called_with(server.subject, "missing")
         self.holder.get_data.side_effect = None
 
-    def test_send(self):
-        """Test sending response.
-        """
-        msg = MagicMock()
-        self.reqman.send(msg)
-        self.context.socket.return_value.send.assert_called_once_with(str(msg))
 
     @patch.object(server, "strp_isoformat")
     def test_run(self, strp_fun):
@@ -287,10 +267,11 @@ class TestServe(unittest.TestCase):
         server.Context.return_value.term.reset_mock()
         server.time.sleep = MagicMock(side_effect=KeyboardInterrupt())
         mirrorcfg = ["this_computer", "neverwhere", "360 180 100",
-                     "/some/where/", 
+                     "/some/where/",
                      server.NoOptionError("boom"),
-                     server.NoOptionError("boom"), "amore_mio",
-                     "/under/the/rainbow/", "bluebird"]
+                     server.NoOptionError("boom"),
+                     "amore_mio",
+                     "/under/the/rainbow/", "wtf?", "bluebird", "mirror", "the_other_place"]
         server.ConfigParser.return_value.get = MagicMock(side_effect=mirrorcfg)
         mirrorcfg = [666, 667, 668, 669]
         server.ConfigParser.return_value.getint = MagicMock(side_effect=mirrorcfg)
@@ -301,7 +282,7 @@ class TestServe(unittest.TestCase):
         server.ConfigParser.return_value.read.assert_called_once_with("test_config.cfg")
 
         # publisher
-        Publisher.assert_called_once_with(server.Context.return_value, 666)
+        Publisher.assert_called_once_with(666)
 
         # heart
         Heart.assert_called_once_with(Publisher.return_value,
@@ -320,13 +301,11 @@ class TestServe(unittest.TestCase):
         self.assertEquals(FileWatcher.call_count, 0)
 
         MirrorWatcher.assert_called_once_with(Holder.return_value,
-                                              server.Context.return_value,
                                               "bluebird", 667, 668,
                                               ScheduleReader.return_value)
         # request manager
 
         RequestManager.assert_called_once_with(Holder.return_value,
-                                               server.Context.return_value,
                                                669, "neverwhere")
 
         # closing apps...
@@ -336,7 +315,6 @@ class TestServe(unittest.TestCase):
                     Heart.return_value,
                     Publisher.return_value]:
             self.assertEquals(app.stop.call_count, 1)
-        self.assertEquals(server.Context.return_value.term.call_count, 1)
 
     @patch.object(time, 'sleep')
     @patch.object(server, 'ScheduleReader')
@@ -369,7 +347,7 @@ class TestServe(unittest.TestCase):
         server.ConfigParser.return_value.read.assert_called_once_with("test_config.cfg")
 
         # publisher
-        Publisher.assert_called_once_with(server.Context.return_value, 666)
+        Publisher.assert_called_once_with(666)
 
         # heart
         Heart.assert_called_once_with(Publisher.return_value,
@@ -393,7 +371,6 @@ class TestServe(unittest.TestCase):
         # request manager
 
         RequestManager.assert_called_once_with(Holder.return_value,
-                                               server.Context.return_value,
                                                667, "neverwhere")
 
         # closing apps...

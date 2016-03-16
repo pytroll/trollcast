@@ -804,7 +804,7 @@ class Heart(Thread):
             if mirror_next_pass is not None:
                 passes.extend(mirror_next_pass)
             if passes:
-                to_send["next_pass"] = sorted(passes, key=(lambda x: x["start_time"]))
+                to_send["next_pass"] = sorted(passes, key=(lambda x: x.get("start_time")))
             to_send["addr"] = self._address
             msg = Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))

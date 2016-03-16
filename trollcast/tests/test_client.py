@@ -24,8 +24,7 @@
 """
 
 import unittest
-import trollcast.client
-from trollcast.client import Client, Requester
+from trollcast.client import Client
 from datetime import datetime
 import time
 from threading import Thread
