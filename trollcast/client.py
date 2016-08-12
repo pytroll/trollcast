@@ -31,19 +31,21 @@ todo:
 from __future__ import with_statement
 
 import logging
-from ConfigParser import ConfigParser, NoOptionError
-from Queue import Queue, Empty
-from datetime import timedelta, datetime
-from threading import Thread, Timer, Event, Lock
-from urlparse import urlsplit
-import numpy as np
-from posttroll.message import Message, strp_isoformat
-from posttroll import context
-from zmq import Context, REQ, LINGER, Poller, POLLIN, SUB, SUBSCRIBE, zmq_version
 import os.path
-from urlparse import urlunparse
-from trollsift import compose
 import warnings
+from ConfigParser import ConfigParser, NoOptionError
+from datetime import datetime, timedelta
+from Queue import Empty, Queue
+from threading import Event, Lock, Thread, Timer
+from urlparse import urlsplit, urlunparse
+
+import numpy as np
+from zmq import (LINGER, POLLIN, REQ, SUB, SUBSCRIBE, Context, Poller,
+                 zmq_version)
+
+from posttroll import context
+from posttroll.message import Message, strp_isoformat
+from trollsift import compose
 
 logger = logging.getLogger(__name__)
 
@@ -653,7 +655,6 @@ class Client(HaveBuffer):
                                      " line %s", str(utctime))
                         continue
 
-
                 except Empty:
                     pass
                 for sat, (utctime, elevation) in sat_last_seen.items():
@@ -682,6 +683,7 @@ class Client(HaveBuffer):
                                 to_send["start_time"] = first_time
                                 to_send["end_time"] = last_time
                                 to_send["data_processing_level"] = "0"
+                                to_send["variant"] = 'DR'
                                 to_send["uid"] = os.path.basename(
                                     filename)
                                 fullname = os.path.realpath(filename)
