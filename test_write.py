@@ -29,10 +29,10 @@ import os
 import sys
 from datetime import datetime
 
-FILENAME = "20120130134606_NOAA_18.temp"
+FILENAME = "/home/a001673/data/20151102041257_NPP.cadu"
 
 try:
-    os.mkdir("/tmp/hrpt")
+    os.mkdir("/tmp/cadu")
 except OSError:
     pass
 
@@ -43,11 +43,15 @@ try:
 except IndexError:
     pass
 
-
-with open(FILENAME, "rb") as fpr:
-    with open("/tmp/hrpt/20120130134606_NOAA_18.temp", "wb") as fpw:
-        truc = fpr.read(30)
-        while truc:
-            fpw.write(truc)
-            truc = fpr.read(10024)
-            time.sleep(0.166)
+try:
+    with open(FILENAME, "rb") as fpr:
+        with open("/tmp/cadu/20151102041257_NPP.temp", "wb") as fpw:
+            truc = fpr.read(3000)
+            cnt = 0
+            while truc:
+                cnt += 1
+                fpw.write(truc)
+                truc = fpr.read(1024 * 166)
+                time.sleep(1.0/6)
+finally:
+    print 'stopped at', datetime.utcnow()

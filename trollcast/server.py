@@ -28,7 +28,7 @@ TODO:
 """
 
 from ConfigParser import ConfigParser, NoOptionError
-from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
+from zmq import Poller, LINGER, PUB, ROUTER, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError, PULL
 from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
 from posttroll import context
@@ -78,11 +78,54 @@ class CADU(object):
 
     """The cadu reader class
     """
-    @staticmethod
-    def is_it(data):
-        return False
+    dtype = np.dtype([('frame_sync', '>u1', (4, )),
+                      ('version', '>u2'),
+                      ('count', '>u1', (3,)),
+                      ('replay', '>u1'),
+                      ('data', 'V886'),
+                      ('rscode', 'V128')])
+    line_size = 1024
+    cadu_sync_start = np.array([0x1A, 0xCF, 0xFC, 0x1D], dtype=np.uint8)
+    satellites = {157: "NPP",
+                  }
+
+    def __init__(self, sat, reftime, fp):
+        self.sat = sat
+        self.fp = fp
+        self.buffer = ''
+
+    def read(self):
+        self.buffer = self.buffer + self.fp.read()
+        array = np.fromstring(self.buffer, dtype=self.dtype, count=len(self.buffer) // self.line_size)
+        for i, line in enumerate(array):
+            platform_id = (line['version'] >> 6) & 0xff
+            vcid = np.asscalar(line['version'] & 0x3f)
+
+            count = np.asscalar(np.sum(line["count"] << (8 * np.array([2, 1, 0]))).astype(np.uint32))
+
+            qual = 100
+            if count == 0:
+                qual = 0
+
+            uid = vcid, count
+
+            logger.debug("Got line VCID: " + str(vcid) + " count: " + str(count) + " platform: "
+                         + str(platform_id))
 
 
+            #yield ((self.sat, uid, 90, qual,
+            #        data[self.line_size * i: self.line_size * (i + 1)]),
+            #       self.line_size * (i + 1), None)
+            yield {'platform_name': self.sat,
+                   'uid': uid,
+                   'data': self.buffer[self.line_size * i: self.line_size * (i + 1)],
+                   'filepos': self.line_size * (i + 1),
+                   'read_time': datetime.utcnow()}
+        self.buffer = self.buffer[len(array) * self.line_size:]
+
+#yield ((satellite, utctime, elevation, qual,
+#                    data[self.line_size * i: self.line_size * (i + 1)]),
+#                   self.line_size * (i + 1), f_elev)
 class HRPT(object):
 
     """The hrpt reader class
@@ -124,10 +167,6 @@ class HRPT(object):
     line_size = 11090 * 2
 
     @staticmethod
-    def is_it(data):
-        return True
-
-    @staticmethod
     def timecode(tc_array):
         """HRPT timecode reading
         """
@@ -154,6 +193,10 @@ class HRPT(object):
     def read(self, data, f_elev=None):
         """Read hrpt data.
         """
+
+        # TODO:
+        # - check next scheduled pass for time consistency
+        # - check time diff between lines, and using a buffer fix diverging times.
 
         now = datetime.utcnow()
         year = now.year
@@ -275,14 +318,16 @@ class HRPT(object):
                    self.line_size * (i + 1), f_elev)
 
 
-FORMATS = [CADU, HRPT]
+FORMATS = {"HRPT": HRPT,
+           "CADU": CADU}
 
 
 class FileWatcher(Thread):
 
-    def __init__(self, holder, uri, schedule_reader):
+    def __init__(self, holder, uri, schedule_reader, datatype):
         Thread.__init__(self)
         self._loop = True
+        self.datatype = datatype
         self._error_event = Event()
         self._wm = WatchManager()
         self._holder = holder
@@ -292,7 +337,8 @@ class FileWatcher(Thread):
                                           _EventHandler(self._holder,
                                                         self._uri,
                                                         self._schedule_reader,
-                                                        self._error_event))
+                                                        self._error_event,
+                                                        self.datatype))
         self._path, self._pattern = os.path.split(urlparse(uri).path)
 
     def start(self):
@@ -313,10 +359,10 @@ class FileWatcher(Thread):
                     _EventHandler(self._holder,
                                   self._uri,
                                   self._schedule_reader,
-                                  self._error_event))
+                                  self._error_event,
+                                  self.datatype))
                 self._notifier.start()
-                self._wm.add_watch(
-                    self._path, IN_OPEN | IN_CLOSE_WRITE | IN_MODIFY)
+                self._wm.add_watch(self._path, IN_OPEN | IN_CLOSE_WRITE | IN_MODIFY)
 
     def stop(self):
         """Stop the file watcher
@@ -330,7 +376,7 @@ class _EventHandler(ProcessEvent):
     """Watch files
     """
 
-    def __init__(self, holder, uri, schedule_reader, error_event):
+    def __init__(self, holder, uri, schedule_reader, error_event, datatype):
         ProcessEvent.__init__(self)
         self._holder = holder
         self._uri = uri
@@ -338,6 +384,7 @@ class _EventHandler(ProcessEvent):
         self._schedule_reader = schedule_reader
         self._loop = True
         self._error_event = error_event
+        self.datatype = datatype
 
         self._path, self._pattern = os.path.split(urlparse(self._uri).path)
 
@@ -384,40 +431,41 @@ class _EventHandler(ProcessEvent):
         """
         try:
             try:
-                filereader, position, f_elev = self._readers[pathname]
+                filereader, position = self._readers[pathname]
             except KeyError:
                 position = 0
-                f_elev = None
+                filetype = FORMATS[self.datatype]
+                filereader = filetype(self.sat, self.time, self._fp)
 
-            self._fp.seek(position)
+            #self._fp.seek(position)
 
-            data = self._fp.read()
+            #data = self._fp.read()
 
-            if position == 0:
-                for filetype in FORMATS:
-                    if filetype.is_it(data):
-                        filereader = filetype(self.sat, self.time)
+            #if position == 0:
+            #    filetype = FORMATS[self.datatype]
+            #    filereader = filetype(self.sat, self.time)
 
-            for elt, offset, f_elev in filereader.read(data, f_elev):
-                self._readers[pathname] = filereader, position + offset, f_elev
+            #for elt, offset, f_elev in filereader.read(data):
+            for item in filereader.read():
+                self._readers[pathname] = filereader, position + item['filepos']
                 if self.sat is not None:
-                    elt = list(elt)
-                    if elt[0] != self.sat:
+                    if item['platform_name'] != self.sat:
                         logger.debug("Satellite id scrambled, "
                                      "lowering quality score.")
-                        elt[3] -= 1
-                    elt[0] = self.sat
+                        item['quality'] -= 1
+                        item['platform_name'] = self.sat
                 elif current_pass is not None:
-                    elt = list(elt)
-                    if elt[1] > current_pass[2] or elt[1] < current_pass[0]:
+                    if 'timecode' in item and item['timecode'] > current_pass[2] or item['timecode'] < current_pass[0]:
                         logger.debug("line %s doesn't match current pass %s",
-                                     str(elt[:2]), str(current_pass))
+                                     str(item['platform_name']) + '/' + str(item['uid']), str(current_pass))
                         continue
-                    if elt[0] != current_pass[1]:
+                    if item['platform_name'] != current_pass[1]:
                         logger.debug("Satellite id scrambled, "
                                      "lowering quality score.")
-                        elt[3] -= 1
-                    elt[0] = current_pass[1]
+                        item['quality'] -= 1
+                        item['platform_name'] = current_pass[1]
+                elt = item.copy()
+                elt.pop('filepos')
                 yield elt
         except IOError, err:
             logger.warning("Can't read file: " + str(err))
@@ -444,7 +492,7 @@ class _EventHandler(ProcessEvent):
             self._current_pass = self._schedule_reader.next_pass
             info = parse(self._pattern, fname)
             try:
-                self.sat = " ".join((info["platform"], info["number"]))
+                self.sat = info["platform_name"]
                 self.time = info["utctime"]
             except KeyError:
                 logger.info("Could not retrieve satellite name from filename")
@@ -468,10 +516,11 @@ class _EventHandler(ProcessEvent):
 
         self.set_reception_active(event)
 
-        for sat, key, elevation, qual, data in self._reader(event.pathname,
-                                                            self._current_pass):
-            if qual > 0:
-                self._holder.add(sat, key, elevation, qual, data)
+        for item in self._reader(event.pathname, self._current_pass):
+        #for sat, key, elevation, qual, data in self._reader(event.pathname,
+        #                                                    self._current_pass):
+            if item.get('quality', 100) > 0:
+                self._holder.add(item)
 
     # def process_IN_CLOSE_WRITE(self, event):
     def clean_up(self, event):
@@ -494,7 +543,7 @@ class _EventHandler(ProcessEvent):
         except KeyError:
             logger.info("No reader defined for %s", str(event.pathname))
 
-from trollcast.client import SimpleRequester, REQ_TIMEOUT
+from trollcast.client import SimpleRequester, ZMQ_REQ_TIMEOUT
 
 
 class _MirrorGetter(object):
@@ -514,20 +563,20 @@ class _MirrorGetter(object):
         if self._data is not None:
             return self._data
 
-        logger.debug("Grabbing scanline from mirror")
+        logger.debug("Grabbing scanline from source")
         reqmsg = Message(subject,
                          'request',
                          {"type": "scanline",
                           "satellite": self._sat,
                           "utctime": self._key})
-        rep = self._req.send_and_recv(str(reqmsg), REQ_TIMEOUT)
+        rep = self._req.send_and_recv(str(reqmsg), ZMQ_REQ_TIMEOUT)
 
         if rep and rep.data:
             self._data = rep.data
-            logger.debug("Retrieved scanline from mirror successfully")
+            logger.debug("Retrieved scanline from source successfully")
         else:
             self._data = None
-            logger.warning("Empty scanline from mirror!")
+            logger.warning("Empty scanline from source!")
         return self._data
 
     def __str__(self):
@@ -542,7 +591,7 @@ class _MirrorGetter(object):
 
 class MirrorWatcher(Thread):
 
-    """Watches a other server.
+    """Watches another server.
     """
 
     def __init__(self, holder, host, pubport, reqport, sched):
@@ -579,7 +628,7 @@ class MirrorWatcher(Thread):
                 continue
             if message.type == "have":
                 sat = message.data["satellite"]
-                key = strp_isoformat(message.data["timecode"])
+                key = strp_isoformat(message.data["uid"])
                 elevation = message.data["elevation"]
                 quality = message.data.get("quality", 100)
                 data = _MirrorGetter(self._req, sat, key)
@@ -644,8 +693,8 @@ class Cleaner(Thread):
         logger.debug("Cleaning")
         for sat in self._holder.sats():
             satlines = self._holder.get_sat(sat)
-            for key in sorted(satlines):
-                if key < datetime.utcnow() - timedelta(hours=self._delay):
+            for key, val in satlines.items():
+                if val['read_time'] < datetime.utcnow() - timedelta(hours=self._delay):
                     self._holder.delete(sat, key)
 
     def run(self):
@@ -697,26 +746,26 @@ class Holder(object):
     def get_data(self, sat, key):
         """get the data of *sat* and *key*
         """
-        return self.get(sat, key)[2]
+        return self.get(sat, key)['data']
 
-    def add(self, sat, key, elevation, qual, data):
+    #def add(self, sat, key, elevation, qual, data):
+    def add(self, item):
         """Add some data.
         """
         with self._lock:
-            self._data.setdefault(sat, {})[key] = elevation, qual, data
-        logger.debug("Got stuff for " + str((sat, key, elevation, qual)))
-        self.have(sat, key, elevation, qual)
+            self._data.setdefault(item['platform_name'], {})[item['uid']] = item
+        display_item = item.copy()
+        display_item.pop('data')
+        display_item.pop('read_time')
+        logger.debug("Got stuff for " + str(display_item))
+        self.have(display_item)
 
-    def have(self, sat, key, elevation, qual):
+    def have(self, item):
         """Tell the world about our new data.
         """
-        to_send = {}
-        to_send["satellite"] = sat
-        to_send["timecode"] = key
-        to_send["elevation"] = elevation
-        to_send["quality"] = qual
+        to_send = item.copy()
+        to_send["satellite"] = item['platform_name']
         to_send["origin"] = self._origin
-        logger.info(str(to_send))
 
         msg = Message(subject, "have", to_send).encode()
         self._pub.send(msg)
@@ -823,27 +872,31 @@ class RequestManager(Thread):
     """Manage requests.
     """
 
-    def __init__(self, holder, port, station):
+    def __init__(self, holder, req_port, rep_port, station):
         Thread.__init__(self)
 
         self._holder = holder
         self._loop = True
-        self._port = port
+        self.req_port = req_port
+        self.rep_port = rep_port
         self._station = station
         self._lock = Lock()
-        self._socket = context.socket(REP)
-        self._socket.bind("tcp://*:" + str(self._port))
+        self.req_socket = context.socket(PULL)
+        self.req_socket.bind("tcp://*:" + str(self.req_port))
         self._poller = Poller()
-        self._poller.register(self._socket, POLLIN)
+        self._poller.register(self.req_socket, POLLIN)
+        self._socket = context.socket(ROUTER)
+        self._socket.bind("tcp://*:" + str(self.rep_port))
 
-    def send(self, message):
+    def send(self, message, req_id, address):
         """Send a message
         """
         if message.binary:
             logger.debug("Response: " + " ".join(str(message).split()[:6]))
         else:
             logger.debug("Response: " + str(message))
-        self._socket.send(str(message))
+        with self._lock:
+            self._socket.send_multipart([address, req_id, str(message)])
 
     def pong(self):
         """Reply to ping
@@ -853,11 +906,14 @@ class RequestManager(Thread):
     def scanline(self, message):
         """Reply to scanline request
         """
-        sat = message.data["satellite"]
-        key = strp_isoformat(message.data["utctime"])
+        sat = message.data['platform_name']
+        key = message.data["uid"]
+        if isinstance(key, list):
+            key = tuple(key)
         try:
             data = self._holder.get_data(sat, key)
         except KeyError:
+            logger.exception("Can't find")
             resp = Message(subject, "missing")
         else:
             resp = Message(subject, "scanline", data, binary=True)
@@ -882,29 +938,32 @@ class RequestManager(Thread):
             except ZMQError:
                 logger.info("Poller interrupted.")
                 continue
-            if self._socket in socks and socks[self._socket] == POLLIN:
-                logger.debug("Received a request, waiting for the lock")
+            if self.req_socket in socks and socks[self.req_socket] == POLLIN:
+                logger.debug("Received a request")
+                tic = datetime.utcnow()
                 with self._lock:
-                    message = Message(rawstr=self._socket.recv(NOBLOCK))
-                    logger.debug("processing request: " + str(message))
-                    reply = Message(subject, "error")
-                    try:
-                        if message.type == "ping":
-                            reply = self.pong()
-                        elif (message.type == "request" and
-                              message.data["type"] == "scanline"):
-                            reply = self.scanline(message)
-                        elif (message.type == "notice" and
-                              message.data["type"] == "scanline"):
-                            reply = self.notice(message)
-                        else:  # unknown request
-                            reply = self.unknown(message)
-                    except:
-                        logger.exception("Something went wrong"
-                                         " when processing the request:")
-                    finally:
-                        self.send(reply)
-                logger.debug("Lock released from manager")
+                    address, req_id, payload = self.req_socket.recv_multipart(NOBLOCK)
+                message = Message(rawstr=payload)
+                logger.debug("processing request: " + str(message))
+                reply = Message(subject, "error")
+                try:
+                    # TODO: run in Threads
+                    if message.type == "ping":
+                        reply = self.pong()
+                    elif (message.type == "request" and
+                          message.data["type"] == "scanline"):
+                        reply = self.scanline(message)
+                    elif (message.type == "notice" and
+                          message.data["type"] == "scanline"):
+                        reply = self.notice(message)
+                    else:  # unknown request
+                        reply = self.unknown(message)
+                except:
+                    logger.exception("Something went wrong"
+                                     " when processing the request:")
+                finally:
+                    self.send(reply, req_id, address)
+                logger.debug("processed request in %s", str(datetime.utcnow() - tic))
             else:  # timeout
                 pass
 
@@ -912,6 +971,8 @@ class RequestManager(Thread):
         """Stop the request manager.
         """
         self._loop = False
+        self.req_socket.setsockopt(LINGER, 0)
+        self.req_socket.close()
         self._socket.setsockopt(LINGER, 0)
         self._socket.close()
 
@@ -984,7 +1045,11 @@ def serve(configfile):
                 path + " doesn't exist, not getting data from files")
         else:
             pattern = cfg.get("local_reception", "file_pattern", raw=True)
-            watcher = FileWatcher(holder, os.path.join(path, pattern), sched)
+            try:
+                datatype = cfg.get("local_reception", "data_type", raw=True)
+            except NoOptionError:
+                datatype = "HRPT"
+            watcher = FileWatcher(holder, os.path.join(path, pattern), sched, datatype)
             watcher.start()
 
         mirror_watcher = None
@@ -1003,7 +1068,8 @@ def serve(configfile):
 
         # request manager
         reqport = cfg.getint(host, "reqport")
-        reqman = RequestManager(holder, reqport, station)
+        repport = cfg.getint(host, "repport")
+        reqman = RequestManager(holder, reqport, repport, station)
         reqman.start()
 
         while True:
