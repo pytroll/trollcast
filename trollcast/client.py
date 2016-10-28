@@ -34,6 +34,7 @@ import os.path
 import time
 import uuid
 import warnings
+from bisect import bisect
 from ConfigParser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
 from Queue import Empty, Queue
@@ -231,8 +232,8 @@ def create_requesters(cfgfile, response_q):
         hostname, req_port, rep_port = (cfg.get(host, "hostname"), cfg.get(
             host, "reqport"), cfg.get(host, "repport"))
         remote_station = host
-        requesters[host] = AsyncRequester(hostname, req_port, rep_port, station, remote_station,
-                                          response_q, pubport)
+        requesters[hostname] = AsyncRequester(hostname, req_port, rep_port, station, remote_station,
+                                              response_q, pubport)
     #host = cfg.get("local_reception", "localhost")
     #pubport = cfg.get(host, "pubport")
     #host, port = (cfg.get(host, "hostname"), cfg.get(host, "reqport"))
@@ -243,19 +244,24 @@ def create_requesters(cfgfile, response_q):
 class ResponseCollector(object):
     """Collect responses."""
 
-    def __init__(self, scanlines):
+    def __init__(self):
         """Initialize the collector."""
         self.loop = True
         self.response_queue = Queue()
         self.packets = {}
         self.ids = []
-        self.scanlines = scanlines
+        self.filename = 'wla.ids'
+        self.maxlen = 200
 
     def collect(self):
         """Collect the data."""
-        vcids = {}
+        self.vcids = {}
         data = []
-        with open('wla.ids', 'wb') as fd_:
+        index = []
+        vcid_counts = {}
+        ids = []
+        # TODO change name when new data arrives
+        with open(self.filename, 'wb') as fd_:
             while self.loop:
                 try:
                     packet_id, response = self.response_queue.get(True, 2)
@@ -263,12 +269,57 @@ class ResponseCollector(object):
                     continue
                 platform_name, packet_info = packet_id
                 vcid, count = packet_info
-                vcids.setdefault(vcid, []).append(count, response.data)
+
+                count_list = vcid_counts.setdefault(vcid, [])
+
                 # test case 16777215 16777216 1 2
-                self.ids.append(packet_id)
-                # self.packets[packet_id] = response.data
-                # logger.debug('yay, we got new data for %s!', str(req_id))
-                fd_.write(str(packet_id) + '\n')
+                if count > 2**24 - self.maxlen * 2 or count < self.maxlen * 2:
+                    count_list = [(the_count - 2 ** 12) %
+                                  2**24 for the_count in count_list]
+                    pos = bisect(count_list, (count - 2 ** 12) % 2**24)
+                else:
+                    pos = bisect(count_list, count)
+
+                if pos == len(count_list):
+                    # just append the packet to the data
+                    data.append(response.data)
+                    vcid_counts[vcid].append(count)
+                    ids.append((vcid, count))
+                elif pos == 0:
+                    # just prepend the packet to the data
+                    data.insert(0, response.data)
+                    vcid_counts[vcid].insert(0, count)
+                    ids.insert(0, (vcid, count))
+                else:
+                    data_pos = ids.index((vcid, count_list[pos - 1]))
+                    ids.insert(data_pos + 1, (vcid, count))
+                    data.insert(data_pos + 1, response.data)
+                    vcid_counts.insert(pos, count)
+
+                while len(ids) > self.maxlen:
+                    vcid_rm, count_rm = ids.pop(0)
+                    fd_.write(str((vcid_rm, count_rm)) + '\n')
+                    data.pop(0)
+                    # fd_.write(data.pop(0))
+                    check_count = vcid_counts[vcid].pop(0)
+                    if check_count != count_rm:
+                        raise RuntimeError('WTF???')
+
+    def dump(self):
+        pass
+        # with open(self.filename, 'wb') as fd_:
+        #     while len(ids):
+        #         vcid_rm, count_rm = ids.pop(0)
+        #         fd_.write(str((vcid_rm, count_rm)) + '\n')
+        #         data.pop(0)
+        #         # fd_.write(data.pop(0))
+        #         check_count = vcid_counts[vcid].pop(0)
+        #         if check_count != count_rm:
+        #             raise RuntimeError('WTF???')
+
+    def stop(self):
+        self.loop = False
+        self.dump()
 
 
 class SimpleRequester(object):
@@ -346,6 +397,7 @@ class AsyncRequester(SimpleRequester):
         self._last_ping = None
         self.ping_time = timedelta(hours=1)
         self._ping_fun = None
+        self.req_lock = Lock()
 
     def stop(self):
         super(AsyncRequester, self).stop()
@@ -394,6 +446,7 @@ class AsyncRequester(SimpleRequester):
             secs = (next_time - datetime.utcnow()).total_seconds()
 
             time.sleep(max(0, secs))
+            print 'waiting'
 
             if uid in self.missing:
                 logger.error("Timeout from " + str(self._reqaddress))
@@ -413,18 +466,22 @@ class AsyncRequester(SimpleRequester):
         """Fire and forget
         """
         if request_id is None:
-            request_id = uuid.uuid4().bytes
-        with self._lock:
+            #request_id = uuid.uuid4().bytes
+            request_id = str(request.time)
+        with self.req_lock:
             logger.debug("Sending %s", str(request))
             self.req_socket.send_multipart([self.uuid, request_id, str(request)
                                             ])
-        self.missing[request_id] = request.data.get('platform_name'), request.data.get('uid')
+        self.missing[request_id] = request.data.get(
+            'platform_name'), request.data.get('uid')
         if others is None:
             others = []
+        logger.debug('sending %s', str(request))
         self.order_queue.put((request_id, request, datetime.utcnow() +
                               timedelta(seconds=REQ_TIMEOUT), others))
 
     def place_order(self, request, other_requesters=None):
+        logger.debug('Placing order %s', str(request))
         self.send(request, others=other_requesters)
 
     def get_line(self, satellite, uid, other_requesters):
@@ -439,6 +496,7 @@ class AsyncRequester(SimpleRequester):
     def ping(self, ping_fun):
         """Send a ping.
         """
+
         msg = Message('/oper/polar/direct_readout/' + self.local_station, 'ping',
                       {"station": self.local_station})
         self._last_ping = datetime.utcnow()
@@ -611,6 +669,7 @@ class HaveBuffer(Thread):
         for message in self._sub.recv(1):
             if message is None:
                 continue
+            logger.debug('Received %s', str(message))
             if (message.type == "have"):
                 packet_info = message.data.copy()
                 sat = packet_info['platform_name']
@@ -624,13 +683,15 @@ class HaveBuffer(Thread):
                 packet_info.setdefault('quality', 100)
                 packet_info['ping_time'] = self._ping_times.get(
                     senderhost, timedelta(hours=1))
-                packet_info['counter'] = counter.setdefault(packet_info['origin'], 0)
+                packet_info['counter'] = counter.setdefault(
+                    packet_info['origin'], 0)
                 counter[packet_info['origin']] += 1
                 # TODO: delete counter when pass is done.
 
                 self.scanlines.setdefault(sat, {})
 
-                requester = self.requesters[packet_info['origin'].split(":")[0]]
+                requester = self.requesters[
+                    packet_info['origin'].split(":")[0]]
                 if uid not in self.scanlines[sat]:
                     self.scanlines[sat][uid] = [packet_info]
                     # self.scanlines[sat][uid] = [
@@ -653,9 +714,9 @@ class HaveBuffer(Thread):
                     # Since append is atomic in CPython, this should work.
                     # However, if it is not, then this is not thread safe.
                     self.scanlines[sat][uid].append(packet_info)
-                    if (len(self.scanlines[sat][uid]) == len(self.requesters)) or
+                    if ((len(self.scanlines[sat][uid]) == len(self.requesters)) or
                         (packet_info['ping_time'] == self._min_ping and
-                         not requester.jammed):
+                         not requester.jammed)):
                         self.send_to_queues(sat, uid)
             elif (message.type == "heartbeat"):
                 senderhost = message.sender.split("@")[1]
@@ -717,6 +778,7 @@ class OrderClient(HaveBuffer):
         self.collector_thread.start()
         self.requesters = create_requesters(cfgfile,
                                             self.collector.response_queue)
+
         self.cfgfile = cfgfile
         self.loop = True
 
@@ -776,7 +838,8 @@ class OrderClient(HaveBuffer):
             sender_quality = sorted(
                 senders,
                 key=(
-                    lambda x: (x.get('quality', 100), -x['ping_time'], x.get('elevation', 90))
+                    lambda x: (x.get('quality', 100), -
+                               x['ping_time'], x.get('elevation', 90))
                 ))
 
             requesters = (self.requesters[packet_info['origin'].split(":")[0]]
@@ -800,6 +863,7 @@ class OrderClient(HaveBuffer):
         self.loop = False
         for req in self.requesters.values():
             req.stop()
+        self.collector.stop()
 
 
 class Client(HaveBuffer):
@@ -814,6 +878,7 @@ class Client(HaveBuffer):
         self.collector_thread.start()
         self.requesters = create_requesters(cfgfile,
                                             self.collector.response_queue)
+
         self.cfgfile = cfgfile
         self.loop = True
 
@@ -843,12 +908,12 @@ class Client(HaveBuffer):
         try:
             while self.loop:
                 try:
-                    sat, uid, senders = queue.get(True, 2)
+                    sat, uid, senders = queue.get(True, 3)
                     if sat not in satellites:
                         continue
 
-                    if sat not in sat_last_seen:
-                        logger.info("Start receiving data for " + sat)
+                    # if sat not in sat_last_seen:
+                    #    logger.info("Start receiving data for " + sat)
 
                     logger.debug("Picking line " + " ".join([str(uid), str(
                         senders)]))
@@ -856,7 +921,7 @@ class Client(HaveBuffer):
                     # sender_quality = sorted(senders,
                     #                                  key=(lambda x: (x.get('quality', 100),
                     #                                                  -x['ping_time'],
-                    #                                                  x.get('elevation', 90))))
+                    # x.get('elevation', 90))))
                     sender_quality = sorted(senders,
                                             key=(lambda x: (-x['ping_time'])))
                     requesters = [
@@ -898,7 +963,9 @@ class Client(HaveBuffer):
                         continue
 
                 except Empty:
-                    pass
+                    self.collector.dump()
+                continue
+
                 # TODO: What if uid is not a time ? CADU
                 for sat, (uid, elevation) in sat_last_seen.items():
                     if (uid + CLIENT_TIMEOUT < datetime.utcnow() or
@@ -917,6 +984,7 @@ class Client(HaveBuffer):
                             fdict["utctime"] = first_time
 
                             filename = compose(self._out, fdict)
+
                             with open(filename, "wb") as fp_:
                                 for linetime in sorted(sat_lines[sat].keys()):
                                     fp_.write(sat_lines[sat][linetime])
