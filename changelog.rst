@@ -1,6 +1,19 @@
 Changelog
 =========
 
+v1.0.1 (2016-10-28)
+-------------------
+
+- Update changelog. [Martin Raspaud]
+
+- Bump version: 1.0.0 → 1.0.1. [Martin Raspaud]
+
+- Add variant to output message. [Martin Raspaud]
+
+- Add setup.cfg for rpm building. [Martin Raspaud]
+
+- Fix unittests. [Martin Raspaud]
+
 v1.0.0 (2016-03-15)
 -------------------
 
