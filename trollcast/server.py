@@ -27,24 +27,27 @@ TODO:
  - check that mirror server is alive
 """
 
-from ConfigParser import ConfigParser, NoOptionError
-from zmq import Poller, LINGER, PUB, ROUTER, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError, PULL
-from threading import Thread, Event, Lock, Timer
-from posttroll.message import Message
-from posttroll import context
-from pyorbital.orbital import Orbital
 import logging
-import time
-from datetime import datetime, timedelta
-from posttroll import strp_isoformat
-from fnmatch import fnmatch
-from pyinotify import (WatchManager, ProcessEvent, ThreadedNotifier,
-                       IN_MODIFY, IN_OPEN, IN_CLOSE_WRITE)
-from urlparse import urlparse
 import os
-import numpy as np
+import time
+from ConfigParser import ConfigParser, NoOptionError
+from datetime import datetime, timedelta
+from fnmatch import fnmatch
 from glob import glob
+from threading import Event, Lock, Thread, Timer
+from urlparse import urlparse
+
+import numpy as np
+from pyinotify import (IN_CLOSE_WRITE, IN_MODIFY, IN_OPEN, ProcessEvent,
+                       ThreadedNotifier, WatchManager)
+from zmq import (LINGER, NOBLOCK, POLLIN, PUB, PULL, ROUTER, SUB, SUBSCRIBE,
+                 Poller, ZMQError)
+
+from posttroll import context, strp_isoformat
+from posttroll.message import Message
+from pyorbital.orbital import Orbital
 from trollcast import schedules
+from trollcast.client import ZMQ_REQ_TIMEOUT, SimpleRequester
 from trollsift.parser import globify, parse
 
 logger = logging.getLogger(__name__)
@@ -96,12 +99,14 @@ class CADU(object):
 
     def read(self):
         self.buffer = self.buffer + self.fp.read()
-        array = np.fromstring(self.buffer, dtype=self.dtype, count=len(self.buffer) // self.line_size)
+        array = np.fromstring(self.buffer, dtype=self.dtype,
+                              count=len(self.buffer) // self.line_size)
         for i, line in enumerate(array):
             platform_id = (line['version'] >> 6) & 0xff
             vcid = np.asscalar(line['version'] & 0x3f)
 
-            count = np.asscalar(np.sum(line["count"] << (8 * np.array([2, 1, 0]))).astype(np.uint32))
+            count = np.asscalar(np.sum(line["count"] << (
+                8 * np.array([2, 1, 0]))).astype(np.uint32))
 
             qual = 100
             if count == 0:
@@ -112,8 +117,7 @@ class CADU(object):
             logger.debug("Got line VCID: " + str(vcid) + " count: " + str(count) + " platform: "
                          + str(platform_id))
 
-
-            #yield ((self.sat, uid, 90, qual,
+            # yield ((self.sat, uid, 90, qual,
             #        data[self.line_size * i: self.line_size * (i + 1)]),
             #       self.line_size * (i + 1), None)
             yield {'platform_name': self.sat,
@@ -123,9 +127,11 @@ class CADU(object):
                    'read_time': datetime.utcnow()}
         self.buffer = self.buffer[len(array) * self.line_size:]
 
-#yield ((satellite, utctime, elevation, qual,
+# yield ((satellite, utctime, elevation, qual,
 #                    data[self.line_size * i: self.line_size * (i + 1)]),
 #                   self.line_size * (i + 1), f_elev)
+
+
 class HRPT(object):
 
     """The hrpt reader class
@@ -362,7 +368,8 @@ class FileWatcher(Thread):
                                   self._error_event,
                                   self.datatype))
                 self._notifier.start()
-                self._wm.add_watch(self._path, IN_OPEN | IN_CLOSE_WRITE | IN_MODIFY)
+                self._wm.add_watch(self._path, IN_OPEN |
+                                   IN_CLOSE_WRITE | IN_MODIFY)
 
     def stop(self):
         """Stop the file watcher
@@ -437,17 +444,18 @@ class _EventHandler(ProcessEvent):
                 filetype = FORMATS[self.datatype]
                 filereader = filetype(self.sat, self.time, self._fp)
 
-            #self._fp.seek(position)
+            # self._fp.seek(position)
 
             #data = self._fp.read()
 
-            #if position == 0:
+            # if position == 0:
             #    filetype = FORMATS[self.datatype]
             #    filereader = filetype(self.sat, self.time)
 
-            #for elt, offset, f_elev in filereader.read(data):
+            # for elt, offset, f_elev in filereader.read(data):
             for item in filereader.read():
-                self._readers[pathname] = filereader, position + item['filepos']
+                self._readers[pathname] = filereader, position + \
+                    item['filepos']
                 if self.sat is not None:
                     if item['platform_name'] != self.sat:
                         logger.debug("Satellite id scrambled, "
@@ -517,8 +525,8 @@ class _EventHandler(ProcessEvent):
         self.set_reception_active(event)
 
         for item in self._reader(event.pathname, self._current_pass):
-        #for sat, key, elevation, qual, data in self._reader(event.pathname,
-        #                                                    self._current_pass):
+            # for sat, key, elevation, qual, data in self._reader(event.pathname,
+            #                                                    self._current_pass):
             if item.get('quality', 100) > 0:
                 self._holder.add(item)
 
@@ -543,7 +551,6 @@ class _EventHandler(ProcessEvent):
         except KeyError:
             logger.info("No reader defined for %s", str(event.pathname))
 
-from trollcast.client import SimpleRequester, ZMQ_REQ_TIMEOUT
 
 
 class _MirrorGetter(object):
@@ -748,12 +755,13 @@ class Holder(object):
         """
         return self.get(sat, key)['data']
 
-    #def add(self, sat, key, elevation, qual, data):
+    # def add(self, sat, key, elevation, qual, data):
     def add(self, item):
         """Add some data.
         """
         with self._lock:
-            self._data.setdefault(item['platform_name'], {})[item['uid']] = item
+            self._data.setdefault(item['platform_name'], {})[
+                item['uid']] = item
         display_item = item.copy()
         display_item.pop('data')
         display_item.pop('read_time')
@@ -768,6 +776,7 @@ class Holder(object):
         to_send["origin"] = self._origin
 
         msg = Message(subject, "have", to_send).encode()
+        logger.debug('Publishing %s', str(msg))
         self._pub.send(msg)
 
 
@@ -853,7 +862,8 @@ class Heart(Thread):
             if mirror_next_pass is not None:
                 passes.extend(mirror_next_pass)
             if passes:
-                to_send["next_pass"] = sorted(passes, key=(lambda x: x.get("start_time")))
+                to_send["next_pass"] = sorted(
+                    passes, key=(lambda x: x.get("start_time")))
             to_send["addr"] = self._address
             msg = Message(subject, "heartbeat", to_send).encode()
             logger.debug("sending heartbeat: " + str(msg))
@@ -942,7 +952,8 @@ class RequestManager(Thread):
                 logger.debug("Received a request")
                 tic = datetime.utcnow()
                 with self._lock:
-                    address, req_id, payload = self.req_socket.recv_multipart(NOBLOCK)
+                    address, req_id, payload = self.req_socket.recv_multipart(
+                        NOBLOCK)
                 message = Message(rawstr=payload)
                 logger.debug("processing request: " + str(message))
                 reply = Message(subject, "error")
@@ -963,7 +974,8 @@ class RequestManager(Thread):
                                      " when processing the request:")
                 finally:
                     self.send(reply, req_id, address)
-                logger.debug("processed request in %s", str(datetime.utcnow() - tic))
+                logger.debug("processed request in %s",
+                             str(datetime.utcnow() - tic))
             else:  # timeout
                 pass
 
@@ -1049,7 +1061,8 @@ def serve(configfile):
                 datatype = cfg.get("local_reception", "data_type", raw=True)
             except NoOptionError:
                 datatype = "HRPT"
-            watcher = FileWatcher(holder, os.path.join(path, pattern), sched, datatype)
+            watcher = FileWatcher(holder, os.path.join(
+                path, pattern), sched, datatype)
             watcher.start()
 
         mirror_watcher = None
