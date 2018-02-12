@@ -163,8 +163,8 @@ class HRPT(object):
             days = self.timecode(line["timecode"])
             utctime = datetime(year, 1, 1) + days
 
-            if utctime > now:
-                # Can't have data from the future... yet :)
+            if utctime > now + timedelta(seconds=1):
+                # Can't have data from the *distant* future... yet :)
                 utctime = datetime(year - 1, 1, 1) + days
 
             qual = (np.sum(line['aux_sync'] == self.hrpt_sync) +
