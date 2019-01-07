@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012, 2014 Martin Raspaud
+# Copyright (c) 2012, 2014, 2019 Martin Raspaud
 
 # Author(s):
 
@@ -73,6 +73,7 @@ if __name__ == '__main__':
 
     times = args.times
 
+    logger.info("Start client with config file: %s", args.config_file)
     client = Client(args.config_file)
     client.start()
 
