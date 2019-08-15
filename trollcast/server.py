@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2014, 2015 Martin Raspaud
+# Copyright (c) 2014 - 2019 Pytroll
 
 # Author(s):
 
@@ -31,7 +31,7 @@ from ConfigParser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
 from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
-from posttroll import context
+from posttroll import get_context
 from pyorbital.orbital import Orbital
 import logging
 import time
@@ -494,6 +494,7 @@ class _EventHandler(ProcessEvent):
         except KeyError:
             logger.info("No reader defined for %s", str(event.pathname))
 
+
 from trollcast.client import SimpleRequester, REQ_TIMEOUT
 
 
@@ -553,7 +554,7 @@ class MirrorWatcher(Thread):
 
         self._req = SimpleRequester(host, reqport)
 
-        self._subsocket = context.socket(SUB)
+        self._subsocket = get_context().socket(SUB)
         self._subsocket.connect(self._pubaddress)
         self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
         self._poller = Poller()
@@ -728,7 +729,7 @@ class Publisher(object):
     """
 
     def __init__(self, port):
-        self._socket = context.socket(PUB)
+        self._socket = get_context().socket(PUB)
         self._socket.bind("tcp://*:" + str(port))
         self._lock = Lock()
 
@@ -831,7 +832,7 @@ class RequestManager(Thread):
         self._port = port
         self._station = station
         self._lock = Lock()
-        self._socket = context.socket(REP)
+        self._socket = get_context().socket(REP)
         self._socket.bind("tcp://*:" + str(self._port))
         self._poller = Poller()
         self._poller.register(self._socket, POLLIN)
@@ -1044,7 +1045,7 @@ def serve(configfile):
         except UnboundLocalError:
             pass
         try:
-            context.term()
+            get_context().term()
         except ZMQError:
             pass
 
