@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012, 2013, 2014, 2015 SMHI
+# Copyright (c) 2012 - 2019 Pytroll
 
 # Author(s):
 
@@ -43,7 +43,8 @@ import numpy as np
 from zmq import (LINGER, POLLIN, REQ, SUB, SUBSCRIBE, Context, Poller,
                  zmq_version)
 
-from posttroll import context
+
+from posttroll import get_context
 from posttroll.message import Message, strp_isoformat
 from trollsift import compose
 
@@ -71,7 +72,8 @@ class Subscriber(object):
         self.subscribers = []
         self._poller = Poller()
         for addr in self._addresses:
-            subscriber = context.socket(SUB)
+
+            subscriber = get_context().socket(SUB)
             subscriber.setsockopt(SUBSCRIBE, "pytroll")
             subscriber.connect(addr)
             self.subscribers.append(subscriber)
@@ -93,7 +95,7 @@ class Subscriber(object):
             self._poller.unregister(self.subscribers[idx])
             self.subscribers[idx].setsockopt(LINGER, 0)
             self.subscribers[idx].close()
-            self.subscribers[idx] = context.socket(SUB)
+            self.subscribers[idx] = get_context().socket(SUB)
             self.subscribers[idx].setsockopt(SUBSCRIBE, "pytroll")
             self.subscribers[idx].connect(addr)
             self._poller.register(self.subscribers[idx], POLLIN)
@@ -256,7 +258,7 @@ class SimpleRequester(object):
     def connect(self):
         """Connect to the server
         """
-        self._socket = context.socket(REQ)
+        self._socket = get_context().socket(REQ)
         self._socket.connect(self._reqaddress)
         self._poller.register(self._socket, POLLIN)
 
