@@ -34,16 +34,16 @@ TODO:
  - Implement choking
  - de-hardcode filename
 """
-from __future__ import with_statement 
+
 
 import logging
 import os
-from ConfigParser import ConfigParser, NoOptionError
+from configparser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from glob import glob
 from threading import Thread, Lock, Event
-from urlparse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import time

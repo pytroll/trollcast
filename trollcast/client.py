@@ -28,16 +28,16 @@ todo:
 - resets connection to mirror in case of timeout.
 
 """
-from __future__ import with_statement
+
 
 import logging
 import os.path
 import warnings
-from ConfigParser import ConfigParser, NoOptionError
+from configparser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
-from Queue import Empty, Queue
+from queue import Empty, Queue
 from threading import Event, Lock, Thread, Timer
-from urlparse import urlsplit, urlunparse
+from urllib.parse import urlsplit, urlunparse
 
 import numpy as np
 from zmq import (LINGER, POLLIN, REQ, SUB, SUBSCRIBE, Context, Poller,
@@ -593,7 +593,7 @@ class Client(HaveBuffer):
         """Retrieve the best (highest elevation) lines of *scanline_dict*.
         """
 
-        for utctime, hosts in scanline_dict.iteritems():
+        for utctime, hosts in scanline_dict.items():
             hostname, elevation = max(hosts, key=(lambda x: x[1]))
             host = hostname.split(":")[0]
 
@@ -767,7 +767,7 @@ class Client(HaveBuffer):
 
             # first, get the existing scanlines from self (client)
             logger.info("Getting list of existing scanlines from client.")
-            for utctime, hosts in self.scanlines.get(satellite, {}).iteritems():
+            for utctime, hosts in self.scanlines.get(satellite, {}).items():
                 if(utctime >= start_time and
                    utctime < end_time and
                    utctime not in saved):
@@ -775,14 +775,14 @@ class Client(HaveBuffer):
 
             # then, get scanlines from the server
             logger.info("Getting list of existing scanlines from server.")
-            for host, req in self._requesters.iteritems():
+            for host, req in self._requesters.items():
                 try:
                     response = req.get_slice(satellite, start_time, end_time)
                     for utcstr, elevation in response:
                         utctime = strp_isoformat(utcstr)
                         lines_to_get.setdefault(utctime, []).append((host,
                                                                      elevation))
-                except IOError, e__:
+                except IOError as e__:
                     logger.warning(e__)
 
             # get lines with highest elevation and add them to current scene

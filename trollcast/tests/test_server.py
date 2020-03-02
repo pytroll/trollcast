@@ -29,7 +29,7 @@ from mock import MagicMock, patch
 from threading import Thread
 
 import sys
-sys.modules["ConfigParser"] = MagicMock()
+sys.modules["configparser"] = MagicMock()
 sys.modules["zmq"] = MagicMock()
 sys.modules["posttroll.message"] = MagicMock()
 sys.modules["pyorbital.orbital"] = MagicMock()

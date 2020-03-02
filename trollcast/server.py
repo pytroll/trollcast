@@ -27,7 +27,8 @@ TODO:
  - check that mirror server is alive
 """
 
-from ConfigParser import ConfigParser, NoOptionError
+from trollcast.client import SimpleRequester, REQ_TIMEOUT
+from configparser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
 from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
@@ -40,7 +41,7 @@ from posttroll import strp_isoformat
 from fnmatch import fnmatch
 from pyinotify import (WatchManager, ProcessEvent, ThreadedNotifier,
                        IN_MODIFY, IN_OPEN, IN_CLOSE_WRITE)
-from urlparse import urlparse
+from urllib.parse import urlparse
 import os
 import numpy as np
 from glob import glob
@@ -419,7 +420,7 @@ class _EventHandler(ProcessEvent):
                         elt[3] -= 1
                     elt[0] = current_pass[1]
                 yield elt
-        except IOError, err:
+        except IOError as err:
             logger.warning("Can't read file: " + str(err))
             return
 
@@ -687,7 +688,7 @@ class Holder(object):
     def sats(self):
         """return the satellites in store.
         """
-        return self._data.keys()
+        return list(self._data.keys())
 
     def get(self, sat, key):
         """get the value of *sat* and *key*
@@ -1072,7 +1073,7 @@ if __name__ == '__main__':
     reftime = datetime.strptime(
         os.path.basename(sys.argv[1])[:14], "%Y%m%d%H%M%S")
     sat = os.path.basename(sys.argv[1])[15:22].replace("_", " ")
-    print "***", reftime, sat
+    print("***", reftime, sat)
 
     with open(sys.argv[1]) as fp:
         lines = fp.read()
@@ -1080,10 +1081,10 @@ if __name__ == '__main__':
     hrpt = HRPT(sat, reftime)
 
     for truc in hrpt.read(lines):
-        print truc[0][:4]
+        print(truc[0][:4])
         # raw_input()
 
     try:
         serve(sys.argv[1])
     except KeyboardInterrupt:
-        print "ok, stopping"
+        print("ok, stopping")
