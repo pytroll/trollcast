@@ -87,7 +87,7 @@ class Subscriber(object):
 
     @property
     def addr_sub(self):
-        return dict(list(zip(self._addresses, self.subscribers)))
+        return dict(zip(self._addresses, self.subscribers))
 
     def reset(self, addr):
         with self._lock:
