@@ -440,7 +440,7 @@ class Responder(SocketLooperThread):
 
     def __del__(self, *args, **kwargs):
         self._socket.close()
-        for mirror in list(self.mirrors.values()):
+        for mirror in self.mirrors.values():
             mirror.close()
             
         
