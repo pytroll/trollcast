@@ -22,7 +22,7 @@
 
 """Continuous writing to test inotify
 """
- 
+
 
 import time
 import os

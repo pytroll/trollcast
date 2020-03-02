@@ -22,7 +22,7 @@
 
 """Continuous writing to test inotify
 """
- 
+
 
 import time
 import os
@@ -77,7 +77,8 @@ while True:
     start_time = datetime.now()
     sat = choice(satellites)
     satname = "_".join(SATELLITES[sat].split())
-    new_filename = "_".join((start_time.strftime("%Y%m%d%H%M%S"), satname)) + ".temp"
+    new_filename = "_".join(
+        (start_time.strftime("%Y%m%d%H%M%S"), satname)) + ".temp"
     new_filename = os.path.join("/tmp/trolltest", new_filename)
     print("choosing", SATELLITES[sat])
     print("filename", new_filename)

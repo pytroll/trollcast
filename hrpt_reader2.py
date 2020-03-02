@@ -185,7 +185,7 @@ def ir_cal(ir_data, telemetry, back_scan, space_data):
     PRT = telemetry['PRT']
     T_PRT = bd0 + PRT * (bd1 + PRT * (bd2 + PRT * (bd3 + PRT * bd4)))
 
-    sublen = np.floor(T_PRT[displacement:,:].shape[0] / 5.0) * 5
+    sublen = np.floor(T_PRT[displacement:, :].shape[0] / 5.0) * 5
     TMP_PRT = T_PRT[displacement:displacement + sublen]
 
     print(" Computing blackbody temperatures...")
