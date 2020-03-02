@@ -22,7 +22,7 @@
 
 """Continuous writing to test inotify
 """
-from __future__ import with_statement 
+ 
 
 import time
 import os
@@ -69,7 +69,7 @@ def satid(gid):
     return (gid >> 3) & 0b1111
 
 now = datetime.now()
-print now - timecode(mk_tc(now))
+print(now - timecode(mk_tc(now)))
 
 delay = 0.166
 
@@ -79,9 +79,9 @@ while True:
     satname = "_".join(SATELLITES[sat].split())
     new_filename = "_".join((start_time.strftime("%Y%m%d%H%M%S"), satname)) + ".temp"
     new_filename = os.path.join("/tmp/trolltest", new_filename)
-    print "choosing", SATELLITES[sat]
-    print "filename", new_filename
-    print "start_time", start_time
+    print("choosing", SATELLITES[sat])
+    print("filename", new_filename)
+    print("start_time", start_time)
     with open(new_filename, "wb") as fpw:
         for i, line in enumerate(arr):
             line["id"]["id"] = mk_id(line["id"]["id"], sat)

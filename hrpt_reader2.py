@@ -52,7 +52,7 @@ def print_bfield(word):
     """Print the bits of a give word.
     """
     for i in range(10):
-        print "bit", i + 1, (word & 2 ** (9 - i)) / 2 ** (9 - i)
+        print("bit", i + 1, (word & 2 ** (9 - i)) / 2 ** (9 - i))
 
 
 def bfield(array, bit):
@@ -151,7 +151,7 @@ def read_file(filename, swap=None):
 def vis_cal(vis_data):
     """Calibrates the visual data using dual gain.
     """
-    print "Visual calibration"
+    print("Visual calibration")
     vis = np.empty(vis_data.shape, dtype=np.float64)
     for i in range(3):
         ch = vis_data[:,:, i]
@@ -169,8 +169,8 @@ def vis_cal(vis_data):
 
 def ir_cal(ir_data, telemetry, back_scan, space_data):
     alen = ir_data.shape[0]
-    print "IR calibration"
-    print " Preparing telemetry..."
+    print("IR calibration")
+    print(" Preparing telemetry...")
     factor = np.ceil(alen / 5.0) + 1
 
     displacement = (telemetry['PRT'][0:5,:] == np.array([0, 0, 0])).sum(1).argmax() + 1
@@ -188,7 +188,7 @@ def ir_cal(ir_data, telemetry, back_scan, space_data):
     sublen = np.floor(T_PRT[displacement:,:].shape[0] / 5.0) * 5
     TMP_PRT = T_PRT[displacement:displacement + sublen]
 
-    print " Computing blackbody temperatures..."
+    print(" Computing blackbody temperatures...")
 
     MEAN = ((TMP_PRT[::5] +
              TMP_PRT[1::5] +
@@ -210,16 +210,16 @@ def ir_cal(ir_data, telemetry, back_scan, space_data):
 
     C_E = ir_data[:,:, 2:]
 
-    print " Computing linear part of radiances..."
+    print(" Computing linear part of radiances...")
 
     C_Sr = C_S.reshape(alen, 1, 3)
     Cr = ((N_BB - N_S) / (C_S - C_BB)).reshape(alen, 1, 3)
     N_lin = ne.evaluate("(N_S + (Cr * (C_Sr - C_E)))")
 
-    print " Computing radiance correction..."
+    print(" Computing radiance correction...")
     N_E = ne.evaluate("(b0 + (b2 * N_lin + b1 + 1) * N_lin)")
 
-    print " Computing channels brightness temperatures..."
+    print(" Computing channels brightness temperatures...")
     T_E_star = ne.evaluate("(c2 * vc / (log(1 + c1 * vc**3 / N_E)))")
     T_E = ne.evaluate("(T_E_star - A) / B")
 
@@ -234,7 +234,7 @@ def scanlines(filename):
     times = [a.days * 24 * 3600 + a.seconds +
              (a.microseconds / 1000) / 1000.0 for a in times]
     pos = np.arange(len(times)) * bytelen
-    return zip(times, pos, [bytelen] * len(times))
+    return list(zip(times, pos, [bytelen] * len(times)))
 
 if __name__ == "__main__":
     #f = "/local_disk/data/satellite/hrpt16_NOAA-19_14-APR-2011_03:50:59.801_11235"
@@ -246,8 +246,8 @@ if __name__ == "__main__":
     tic = datetime.now()
     data_array = read_file(f)
     toc = datetime.now()
-    print "took", toc - tic, "to read", data_array["image_data"].shape
-    print "Time of first scanline:", timecode(data_array["timecode"][0])
+    print("took", toc - tic, "to read", data_array["image_data"].shape)
+    print("Time of first scanline:", timecode(data_array["timecode"][0]))
     vis = vis_cal(data_array["image_data"][:,:, :3])
     ir_ = ir_cal(data_array["image_data"][:,:, 2:], data_array["telemetry"],
                  data_array["back_scan"], data_array["space_data"])

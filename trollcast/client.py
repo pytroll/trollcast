@@ -28,16 +28,16 @@ todo:
 - resets connection to mirror in case of timeout.
 
 """
-from __future__ import with_statement
+
 
 import logging
 import os.path
 import warnings
-from ConfigParser import ConfigParser, NoOptionError
+from configparser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
-from Queue import Empty, Queue
+from queue import Empty, Queue
 from threading import Event, Lock, Thread, Timer
-from urlparse import urlsplit, urlunparse
+from urllib.parse import urlsplit, urlunparse
 
 import numpy as np
 from zmq import (LINGER, POLLIN, REQ, SUB, SUBSCRIBE, Context, Poller,
@@ -83,11 +83,11 @@ class Subscriber(object):
 
     @property
     def sub_addr(self):
-        return dict(zip(self.subscribers, self._addresses))
+        return dict(list(zip(self.subscribers, self._addresses)))
 
     @property
     def addr_sub(self):
-        return dict(zip(self._addresses, self.subscribers))
+        return dict(list(zip(self._addresses, self.subscribers)))
 
     def reset(self, addr):
         with self._lock:
@@ -525,7 +525,7 @@ class HaveBuffer(Thread):
                              ": " + str(message))
                 self._hb[str(sender)].reset()
 
-                for addr, req in self._requesters.items():
+                for addr, req in list(self._requesters.items()):
                     # can we get the ip adress from the socket somehow ?
                     # because right now the pubaddr and sender are not the same
                     # (name vs ip)
@@ -546,7 +546,7 @@ class HaveBuffer(Thread):
         """Stop buffering.
         """
         self._sub.stop()
-        for timer in self._hb.values():
+        for timer in list(self._hb.values()):
             timer.stop()
         if self._publisher:
             self._publisher.stop()
@@ -593,7 +593,7 @@ class Client(HaveBuffer):
         """Retrieve the best (highest elevation) lines of *scanline_dict*.
         """
 
-        for utctime, hosts in scanline_dict.iteritems():
+        for utctime, hosts in scanline_dict.items():
             hostname, elevation = max(hosts, key=(lambda x: x[1]))
             host = hostname.split(":")[0]
 
@@ -659,7 +659,7 @@ class Client(HaveBuffer):
 
                 except Empty:
                     pass
-                for sat, (utctime, elevation) in sat_last_seen.items():
+                for sat, (utctime, elevation) in list(sat_last_seen.items()):
                     if (utctime + CLIENT_TIMEOUT < datetime.utcnow() or
                         (utctime + timedelta(seconds=3) < datetime.utcnow() and
                          elevation < 0.5 and
@@ -726,7 +726,7 @@ class Client(HaveBuffer):
                             del sat_last_seen[sat]
                             first_time = None
         except KeyboardInterrupt:
-            for sat, (utctime, elevation) in sat_last_seen.items():
+            for sat, (utctime, elevation) in list(sat_last_seen.items()):
                 logger.info(sat + ": writing file.")
                 first_time = (first_time
                               or min(sat_lines[sat].keys()))
@@ -767,7 +767,7 @@ class Client(HaveBuffer):
 
             # first, get the existing scanlines from self (client)
             logger.info("Getting list of existing scanlines from client.")
-            for utctime, hosts in self.scanlines.get(satellite, {}).iteritems():
+            for utctime, hosts in self.scanlines.get(satellite, {}).items():
                 if(utctime >= start_time and
                    utctime < end_time and
                    utctime not in saved):
@@ -775,14 +775,14 @@ class Client(HaveBuffer):
 
             # then, get scanlines from the server
             logger.info("Getting list of existing scanlines from server.")
-            for host, req in self._requesters.iteritems():
+            for host, req in self._requesters.items():
                 try:
                     response = req.get_slice(satellite, start_time, end_time)
                     for utcstr, elevation in response:
                         utctime = strp_isoformat(utcstr)
                         lines_to_get.setdefault(utctime, []).append((host,
                                                                      elevation))
-                except IOError, e__:
+                except IOError as e__:
                     logger.warning(e__)
 
             # get lines with highest elevation and add them to current scene
@@ -875,5 +875,5 @@ class Client(HaveBuffer):
     def stop(self):
         HaveBuffer.stop(self)
         self.loop = False
-        for req in self._requesters.values():
+        for req in list(self._requesters.values()):
             req.stop()
