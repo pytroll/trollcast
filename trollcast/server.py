@@ -27,6 +27,7 @@ TODO:
  - check that mirror server is alive
 """
 
+from trollcast.client import SimpleRequester, REQ_TIMEOUT
 from configparser import ConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
 from threading import Thread, Event, Lock, Timer
