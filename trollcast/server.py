@@ -802,7 +802,7 @@ class Heart(Thread):
             mirror_next_pass = self._schedule_reader.mirror_next_pass
             passes = []
             if next_pass is not None:
-                passes.append(dict(list(zip(keys, next_pass))))
+                passes.append(dict(zip(keys, next_pass)))
             if mirror_next_pass is not None:
                 passes.extend(mirror_next_pass)
             if passes:
