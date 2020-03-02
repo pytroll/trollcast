@@ -659,7 +659,7 @@ class Client(HaveBuffer):
 
                 except Empty:
                     pass
-                for sat, (utctime, elevation) in list(sat_last_seen.items()):
+                for sat, (utctime, elevation) in sat_last_seen.items():
                     if (utctime + CLIENT_TIMEOUT < datetime.utcnow() or
                         (utctime + timedelta(seconds=3) < datetime.utcnow() and
                          elevation < 0.5 and
