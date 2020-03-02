@@ -525,7 +525,7 @@ class HaveBuffer(Thread):
                              ": " + str(message))
                 self._hb[str(sender)].reset()
 
-                for addr, req in list(self._requesters.items()):
+                for addr, req in self._requesters.items():
                     # can we get the ip adress from the socket somehow ?
                     # because right now the pubaddr and sender are not the same
                     # (name vs ip)
