@@ -83,7 +83,7 @@ class Subscriber(object):
 
     @property
     def sub_addr(self):
-        return dict(list(zip(self.subscribers, self._addresses)))
+        return dict(zip(self.subscribers, self._addresses))
 
     @property
     def addr_sub(self):
