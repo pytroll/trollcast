@@ -875,5 +875,5 @@ class Client(HaveBuffer):
     def stop(self):
         HaveBuffer.stop(self)
         self.loop = False
-        for req in list(self._requesters.values()):
+        for req in self._requesters.values():
             req.stop()
