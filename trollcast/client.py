@@ -726,7 +726,7 @@ class Client(HaveBuffer):
                             del sat_last_seen[sat]
                             first_time = None
         except KeyboardInterrupt:
-            for sat, (utctime, elevation) in list(sat_last_seen.items()):
+            for sat, (utctime, elevation) in sat_last_seen.items():
                 logger.info(sat + ": writing file.")
                 first_time = (first_time
                               or min(sat_lines[sat].keys()))
