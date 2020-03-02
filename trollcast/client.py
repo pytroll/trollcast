@@ -546,7 +546,7 @@ class HaveBuffer(Thread):
         """Stop buffering.
         """
         self._sub.stop()
-        for timer in list(self._hb.values()):
+        for timer in self._hb.values():
             timer.stop()
         if self._publisher:
             self._publisher.stop()
