@@ -33,7 +33,7 @@ todo:
 import logging
 import os.path
 import warnings
-from configparser import ConfigParser, NoOptionError
+from configparser import RawConfigParser, NoOptionError
 from datetime import datetime, timedelta
 from queue import Empty, Queue
 from threading import Event, Lock, Thread, Timer
@@ -74,7 +74,7 @@ class Subscriber(object):
         for addr in self._addresses:
 
             subscriber = get_context().socket(SUB)
-            subscriber.setsockopt(SUBSCRIBE, "pytroll")
+            subscriber.setsockopt_string(SUBSCRIBE, "pytroll")
             subscriber.connect(addr)
             self.subscribers.append(subscriber)
             self._poller.register(subscriber)
@@ -96,7 +96,7 @@ class Subscriber(object):
             self.subscribers[idx].setsockopt(LINGER, 0)
             self.subscribers[idx].close()
             self.subscribers[idx] = get_context().socket(SUB)
-            self.subscribers[idx].setsockopt(SUBSCRIBE, "pytroll")
+            self.subscribers[idx].setsockopt_string(SUBSCRIBE, "pytroll")
             self.subscribers[idx].connect(addr)
             self._poller.register(self.subscribers[idx], POLLIN)
 
@@ -140,7 +140,7 @@ def create_subscriber(cfgfile):
     """Create a new subscriber for all the remote hosts in cfgfile.
     """
 
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     addrs = []
     for host in cfg.get("local_reception", "remotehosts").split():
@@ -200,7 +200,7 @@ def reset_subscriber(subscriber, addr):
 
 
 def create_timers(cfgfile, subscriber):
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     addrs = []
     timers = {}
@@ -222,7 +222,7 @@ def create_timers(cfgfile, subscriber):
 def create_requesters(cfgfile):
     """Create requesters to all the configure remote hosts.
     """
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     station = cfg.get("local_reception", "station")
     requesters = {}
@@ -284,7 +284,7 @@ class SimpleRequester(object):
         with self._lock:
             retries_left = self.request_retries
             request = str(msg)
-            self._socket.send(request)
+            self._socket.send_string(request)
             rep = None
             while retries_left:
                 socks = dict(self._poller.poll(timeout))
@@ -321,7 +321,7 @@ class SimpleRequester(object):
                     logger.info("Reconnecting and resending " + str(msg))
                     # Create new connection
                     self.connect()
-                    self._socket.send(request)
+                    self._socket.send_string(request)
         logger.debug("Release request lock")
         return rep
 
@@ -342,7 +342,7 @@ class Requester(SimpleRequester):
         """
         warnings.warn("Send method of Requester is deprecated",
                       DeprecationWarning)
-        return self._socket.send(str(msg))
+        return self._socket.send_string(str(msg))
 
     def recv(self, timeout=None):
         """Receive a message. *timeout* in ms.
@@ -417,7 +417,7 @@ class Requester(SimpleRequester):
 
 
 def create_publisher(cfgfile):
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     try:
         publisher = cfg.get("local_reception", "publisher")
@@ -440,7 +440,7 @@ class HaveBuffer(Thread):
         self._sub = create_subscriber(cfgfile)
         self._hb = create_timers(cfgfile, self._sub)
         self._publisher = create_publisher(cfgfile)
-        cfg = ConfigParser()
+        cfg = RawConfigParser()
         cfg.read(cfgfile)
         try:
             self._out = cfg.get("local_reception", "output_file")
@@ -865,7 +865,7 @@ class Client(HaveBuffer):
     def send_lineinfo_to_server(self, *args, **kwargs):
         """Send information to our own server.
         """
-        cfg = ConfigParser()
+        cfg = RawConfigParser()
         cfg.read(self.cfgfile)
         host = cfg.get("local_reception", "localhost")
         host, port = (cfg.get(host, "hostname"),  cfg.get(host, "reqport"))
