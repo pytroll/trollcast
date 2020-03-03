@@ -87,8 +87,11 @@ class TestPublisher(unittest.TestCase):
         context.socket.return_value.send.side_effect = None
         pub.send("send 2")
         thr.join()
-        self.assertEquals(pub._socket.send_string.call_args_list[0][0][0], "send 1")
-        self.assertEquals(pub._socket.send_string.call_args_list[1][0][0], "send 2")
+        self.assertEquals(
+            pub._socket.send_string.call_args_list[0][0][0], "send 1")
+        self.assertEquals(
+            pub._socket.send_string.call_args_list[1][0][0], "send 2")
+
 
 class TestHolder(unittest.TestCase):
 
@@ -272,14 +275,17 @@ class TestServe(unittest.TestCase):
                      server.NoOptionError("boom"),
                      "amore_mio",
                      "/under/the/rainbow/", "wtf?", "bluebird", "mirror", "the_other_place"]
-        server.RawConfigParser.return_value.get = MagicMock(side_effect=mirrorcfg)
+        server.RawConfigParser.return_value.get = MagicMock(
+            side_effect=mirrorcfg)
         mirrorcfg = [666, 667, 668, 669]
-        server.RawConfigParser.return_value.getint = MagicMock(side_effect=mirrorcfg)
+        server.RawConfigParser.return_value.getint = MagicMock(
+            side_effect=mirrorcfg)
         server.serve("test_config.cfg")
 
         # Config reading
 
-        server.RawConfigParser.return_value.read.assert_called_once_with("test_config.cfg")
+        server.RawConfigParser.return_value.read.assert_called_once_with(
+            "test_config.cfg")
 
         # publisher
         Publisher.assert_called_once_with(666)
@@ -338,13 +344,16 @@ class TestServe(unittest.TestCase):
                    "schedformat", "amore_mio",
                    "/tmp", "*.hmf",
                    server.NoOptionError("boom")]
-        server.RawConfigParser.return_value.get = MagicMock(side_effect=filecfg)
+        server.RawConfigParser.return_value.get = MagicMock(
+            side_effect=filecfg)
         filecfg = [666, 667, 668, 669]
-        server.RawConfigParser.return_value.getint = MagicMock(side_effect=filecfg)
+        server.RawConfigParser.return_value.getint = MagicMock(
+            side_effect=filecfg)
         server.serve("test_config.cfg")
 
         # Config reading
-        server.RawConfigParser.return_value.read.assert_called_once_with("test_config.cfg")
+        server.RawConfigParser.return_value.read.assert_called_once_with(
+            "test_config.cfg")
 
         # publisher
         Publisher.assert_called_once_with(666)
