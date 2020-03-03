@@ -659,6 +659,7 @@ class Client(HaveBuffer):
 
                 except Empty:
                     pass
+                to_be_deleted = []
                 for sat, (utctime, elevation) in sat_last_seen.items():
                     if (utctime + CLIENT_TIMEOUT < datetime.utcnow() or
                         (utctime + timedelta(seconds=3) < datetime.utcnow() and
@@ -723,9 +724,12 @@ class Client(HaveBuffer):
                             continue
                         finally:
                             sat_lines[sat] = {}
-                            del sat_last_seen[sat]
+                            to_be_deleted.append(sat)
                             first_time = None
+                for sat in to_be_deleted:
+                    del sat_last_seen[sat]
         except KeyboardInterrupt:
+            to_be_deleted = []
             for sat, (utctime, elevation) in sat_last_seen.items():
                 logger.info(sat + ": writing file.")
                 first_time = (first_time
@@ -736,6 +740,7 @@ class Client(HaveBuffer):
                         fp_.write(sat_lines[sat][linetime])
 
                 sat_lines[sat] = {}
+            for sat in to_be_deleted:
                 del sat_last_seen[sat]
             raise
 
