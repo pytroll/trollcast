@@ -77,7 +77,7 @@ class Subscriber(object):
             subscriber.setsockopt_string(SUBSCRIBE, "pytroll")
             subscriber.connect(addr)
             self.subscribers.append(subscriber)
-            self._poller.register(subscriber)
+            self._poller.register(subscriber, POLLIN)
         self._lock = Lock()
         self._loop = True
 
@@ -92,9 +92,12 @@ class Subscriber(object):
     def reset(self, addr):
         with self._lock:
             idx = self._addresses.index(addr)
-            self._poller.unregister(self.subscribers[idx])
-            self.subscribers[idx].setsockopt(LINGER, 0)
-            self.subscribers[idx].close()
+            try:
+                self._poller.unregister(self.subscribers[idx])
+                self.subscribers[idx].setsockopt(LINGER, 0)
+                self.subscribers[idx].close()
+            except KeyError:
+                pass
             self.subscribers[idx] = get_context().socket(SUB)
             self.subscribers[idx].setsockopt_string(SUBSCRIBE, "pytroll")
             self.subscribers[idx].connect(addr)
