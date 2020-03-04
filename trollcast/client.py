@@ -41,8 +41,7 @@ from urllib.parse import urlsplit, urlunparse
 
 import numpy as np
 from zmq import (LINGER, POLLIN, REQ, SUB, SUBSCRIBE, Context, Poller,
-                 zmq_version)
-
+                 zmq_version, ZMQError)
 
 from posttroll import get_context
 from posttroll.message import Message, strp_isoformat
@@ -268,9 +267,12 @@ class SimpleRequester(object):
     def stop(self):
         """Close the connection to the server
         """
-        self._socket.setsockopt(LINGER, 0)
-        self._socket.close()
-        self._poller.unregister(self._socket)
+        try:
+            self._socket.setsockopt(LINGER, 0)
+            self._socket.close()
+            self._poller.unregister(self._socket)
+        except ZMQError:
+            pass
 
     def reset_connection(self):
         """Reset the socket
