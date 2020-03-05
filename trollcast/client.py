@@ -652,6 +652,9 @@ class Client(HaveBuffer):
                             logger.warning("Could not retrieve line %s",
                                            str(utctime))
                         else:
+                            # Convert the data to bytes
+                            if isinstance(line, str):
+                                line = bytes(line, 'UTF-8')
                             sat_lines[sat][utctime] = line
                             if first_time is None and quality == 100:
                                 first_time = utctime
