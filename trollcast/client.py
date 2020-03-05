@@ -638,6 +638,8 @@ class Client(HaveBuffer):
                                                                       x[1])))
                     best_req = None
                     for sender, elevation, quality, ping_time in reversed(sender_elevation_quality):
+                        if not elevation or not quality:
+                            continue
                         best_req = self._requesters[sender.split(":")[0]]
                         if best_req.jammed:
                             continue
