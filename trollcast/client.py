@@ -33,7 +33,7 @@ todo:
 import logging
 import os.path
 import warnings
-from configparser import ConfigParser, NoOptionError
+from configparser import RawConfigParser, NoOptionError
 from datetime import datetime, timedelta
 from queue import Empty, Queue
 from threading import Event, Lock, Thread, Timer
@@ -41,8 +41,7 @@ from urllib.parse import urlsplit, urlunparse
 
 import numpy as np
 from zmq import (LINGER, POLLIN, REQ, SUB, SUBSCRIBE, Context, Poller,
-                 zmq_version)
-
+                 zmq_version, ZMQError)
 
 from posttroll import get_context
 from posttroll.message import Message, strp_isoformat
@@ -74,10 +73,10 @@ class Subscriber(object):
         for addr in self._addresses:
 
             subscriber = get_context().socket(SUB)
-            subscriber.setsockopt(SUBSCRIBE, "pytroll")
+            subscriber.setsockopt_string(SUBSCRIBE, "pytroll")
             subscriber.connect(addr)
             self.subscribers.append(subscriber)
-            self._poller.register(subscriber)
+            self._poller.register(subscriber, POLLIN)
         self._lock = Lock()
         self._loop = True
 
@@ -92,11 +91,14 @@ class Subscriber(object):
     def reset(self, addr):
         with self._lock:
             idx = self._addresses.index(addr)
-            self._poller.unregister(self.subscribers[idx])
-            self.subscribers[idx].setsockopt(LINGER, 0)
-            self.subscribers[idx].close()
+            try:
+                self._poller.unregister(self.subscribers[idx])
+                self.subscribers[idx].setsockopt(LINGER, 0)
+                self.subscribers[idx].close()
+            except KeyError:
+                pass
             self.subscribers[idx] = get_context().socket(SUB)
-            self.subscribers[idx].setsockopt(SUBSCRIBE, "pytroll")
+            self.subscribers[idx].setsockopt_string(SUBSCRIBE, "pytroll")
             self.subscribers[idx].connect(addr)
             self._poller.register(self.subscribers[idx], POLLIN)
 
@@ -140,7 +142,7 @@ def create_subscriber(cfgfile):
     """Create a new subscriber for all the remote hosts in cfgfile.
     """
 
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     addrs = []
     for host in cfg.get("local_reception", "remotehosts").split():
@@ -200,7 +202,7 @@ def reset_subscriber(subscriber, addr):
 
 
 def create_timers(cfgfile, subscriber):
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     addrs = []
     timers = {}
@@ -222,7 +224,7 @@ def create_timers(cfgfile, subscriber):
 def create_requesters(cfgfile):
     """Create requesters to all the configure remote hosts.
     """
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     station = cfg.get("local_reception", "station")
     requesters = {}
@@ -265,9 +267,12 @@ class SimpleRequester(object):
     def stop(self):
         """Close the connection to the server
         """
-        self._socket.setsockopt(LINGER, 0)
-        self._socket.close()
-        self._poller.unregister(self._socket)
+        try:
+            self._socket.setsockopt(LINGER, 0)
+            self._socket.close()
+            self._poller.unregister(self._socket)
+        except ZMQError:
+            pass
 
     def reset_connection(self):
         """Reset the socket
@@ -284,7 +289,7 @@ class SimpleRequester(object):
         with self._lock:
             retries_left = self.request_retries
             request = str(msg)
-            self._socket.send(request)
+            self._socket.send_string(request)
             rep = None
             while retries_left:
                 socks = dict(self._poller.poll(timeout))
@@ -321,7 +326,7 @@ class SimpleRequester(object):
                     logger.info("Reconnecting and resending " + str(msg))
                     # Create new connection
                     self.connect()
-                    self._socket.send(request)
+                    self._socket.send_string(request)
         logger.debug("Release request lock")
         return rep
 
@@ -342,7 +347,7 @@ class Requester(SimpleRequester):
         """
         warnings.warn("Send method of Requester is deprecated",
                       DeprecationWarning)
-        return self._socket.send(str(msg))
+        return self._socket.send_string(str(msg))
 
     def recv(self, timeout=None):
         """Receive a message. *timeout* in ms.
@@ -417,7 +422,7 @@ class Requester(SimpleRequester):
 
 
 def create_publisher(cfgfile):
-    cfg = ConfigParser()
+    cfg = RawConfigParser()
     cfg.read(cfgfile)
     try:
         publisher = cfg.get("local_reception", "publisher")
@@ -440,7 +445,7 @@ class HaveBuffer(Thread):
         self._sub = create_subscriber(cfgfile)
         self._hb = create_timers(cfgfile, self._sub)
         self._publisher = create_publisher(cfgfile)
-        cfg = ConfigParser()
+        cfg = RawConfigParser()
         cfg.read(cfgfile)
         try:
             self._out = cfg.get("local_reception", "output_file")
@@ -633,6 +638,8 @@ class Client(HaveBuffer):
                                                                       x[1])))
                     best_req = None
                     for sender, elevation, quality, ping_time in reversed(sender_elevation_quality):
+                        if not elevation or not quality:
+                            continue
                         best_req = self._requesters[sender.split(":")[0]]
                         if best_req.jammed:
                             continue
@@ -647,6 +654,9 @@ class Client(HaveBuffer):
                             logger.warning("Could not retrieve line %s",
                                            str(utctime))
                         else:
+                            # Convert the data to bytes
+                            if isinstance(line, str):
+                                line = bytes(line, 'UTF-8')
                             sat_lines[sat][utctime] = line
                             if first_time is None and quality == 100:
                                 first_time = utctime
@@ -659,6 +669,7 @@ class Client(HaveBuffer):
 
                 except Empty:
                     pass
+                to_be_deleted = []
                 for sat, (utctime, elevation) in sat_last_seen.items():
                     if (utctime + CLIENT_TIMEOUT < datetime.utcnow() or
                         (utctime + timedelta(seconds=3) < datetime.utcnow() and
@@ -723,9 +734,12 @@ class Client(HaveBuffer):
                             continue
                         finally:
                             sat_lines[sat] = {}
-                            del sat_last_seen[sat]
+                            to_be_deleted.append(sat)
                             first_time = None
+                for sat in to_be_deleted:
+                    del sat_last_seen[sat]
         except KeyboardInterrupt:
+            to_be_deleted = []
             for sat, (utctime, elevation) in sat_last_seen.items():
                 logger.info(sat + ": writing file.")
                 first_time = (first_time
@@ -736,6 +750,7 @@ class Client(HaveBuffer):
                         fp_.write(sat_lines[sat][linetime])
 
                 sat_lines[sat] = {}
+            for sat in to_be_deleted:
                 del sat_last_seen[sat]
             raise
 
@@ -865,7 +880,7 @@ class Client(HaveBuffer):
     def send_lineinfo_to_server(self, *args, **kwargs):
         """Send information to our own server.
         """
-        cfg = ConfigParser()
+        cfg = RawConfigParser()
         cfg.read(self.cfgfile)
         host = cfg.get("local_reception", "localhost")
         host, port = (cfg.get(host, "hostname"),  cfg.get(host, "reqport"))

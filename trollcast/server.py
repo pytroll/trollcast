@@ -28,7 +28,7 @@ TODO:
 """
 
 from trollcast.client import SimpleRequester, REQ_TIMEOUT
-from configparser import ConfigParser, NoOptionError
+from configparser import RawConfigParser, NoOptionError
 from zmq import Context, Poller, LINGER, PUB, REP, POLLIN, NOBLOCK, SUB, SUBSCRIBE, ZMQError
 from threading import Thread, Event, Lock, Timer
 from posttroll.message import Message
@@ -557,7 +557,7 @@ class MirrorWatcher(Thread):
 
         self._subsocket = get_context().socket(SUB)
         self._subsocket.connect(self._pubaddress)
-        self._subsocket.setsockopt(SUBSCRIBE, "pytroll")
+        self._subsocket.setsockopt_string(SUBSCRIBE, "pytroll")
         self._poller = Poller()
         self._poller.register(self._subsocket, POLLIN)
         self._lock = Lock()
@@ -738,7 +738,7 @@ class Publisher(object):
         """Publish something
         """
         with self._lock:
-            self._socket.send(str(message))
+            self._socket.send_string(str(message))
 
     def stop(self):
         """Stop publishing.
@@ -845,7 +845,7 @@ class RequestManager(Thread):
             logger.debug("Response: " + " ".join(str(message).split()[:6]))
         else:
             logger.debug("Response: " + str(message))
-        self._socket.send(str(message))
+        self._socket.send_string(str(message))
 
     def pong(self):
         """Reply to ping
@@ -928,7 +928,7 @@ def serve(configfile):
     """
 
     try:
-        cfg = ConfigParser()
+        cfg = RawConfigParser()
         cfg.read(configfile)
 
         host = cfg.get("local_reception", "localhost")
